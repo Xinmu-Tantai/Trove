@@ -1,0 +1,14 @@
+{
+  "article_id": "x-foresight",
+  "paper_title": "X-Foresight: A Joint Vision-Action Causal Forecasting Network via Predictive World Modeling",
+  "source_pdf": "sources/X-Foresight - A Joint Vision-Action Causal Forecasting Network via Predictive World Modeling.pdf",
+  "sha256": "58111f3080dd5805abe7f8ea2190312732aa628ee9a083020e2faf63ba946c05",
+  "page_count": 19,
+  "text_output": "work/x-foresight/paper.txt",
+  "rendered_pages": [
+    1,
+    2,
+    3
+  ],
+  "prepared_at": "2026-09-25T10:11:26.880499+00:00"
+}

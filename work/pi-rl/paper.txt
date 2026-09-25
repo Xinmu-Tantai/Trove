@@ -1,0 +1,1532 @@
+
+
+===== PAGE 1 =====
+
+   πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+                  Kang Chen2,6,∗       Zhihao Liu3,6,∗       Tonghe Zhang4,∗,♯       Zhen Guo5  Si Xu5  Hao Lin5
+                        Hongzhi Zang1  Xiang Li5  Bingwen Wei1  Jiakai Zhou1  Quanlu Zhang5
+                           Zhaofei Yu2  Guoliang Fan3  Tiejun Huang2  Yu Wang1†    Chao Yu1†
+
+                                   https://github.com/RLinf/RLinf             https://huggingface.co/RLinf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure1. πRL: AnonlineRLframeworkforflow-basedVLAs. Incorporatingtwosolutions,Flow-NoiseandFlow-SDE,πRL enhancesthe
+performanceandgeneralizationofSFT-alignedmodelsacrossextensiveIDbenchmarksandOODsettings. RefinedwithRL,few-shot
+SFTpoliciesachieveperformancecomparabletofulldatasetbaselines. Additionally,wefacilitateseamlesszero-shotsim-to-realtransfer
+by constructing a simulator with 3D Gaussian Splatting as the rendering engine to narrow the visual domain gap.
+
+                            Abstract                                            π0.5  ) remains challenging due to intractable ac-
+      Vision-Language-Action (VLA) models enable                                tion log-likelihoods raised from flow matching.
+      robotstounderstand andperformcomplex tasks                                WeaddressthischallengewithπRL,featuringtwo
+      from multimodal input.  Although recent work                              technical approaches: (1)Flow-Noisemodels the
+      explores using reinforcement learning (RL) to                             denoisingprocessas adiscrete-timeMDP witha
+      automate the laborious data collection process                            learnable noise network for exact log-likelihood
+      in scaling supervised fine-tuning (SFT), apply-                           computation. (2)Flow-SDEintegrates denoising
+      ingRLtolarge-scaleflow-basedVLAs(e.g.,      π0,                           withagent-environmentinteraction,formulating
+                                                                                atwo-layerMDPthatemploysODE-to-SDEcon-
+    1Tsinghua University  2Peking University  3Institute of Au-                 version for efficient RL exploration. We evaluate
+tomation, Chinese Academy of Sciences 4Carnegie Mellon Uni-                     πRL acrossvariousbenchmarks,withexperiments
+versity 5Infinigence AI 6Zhongguancun Academy ♯ Work done                       demonstrating that RL yields significant perfor-
+at  Tsinghua  University ∗  Equal  Contributions  .    Correspon-               manceimprovementsin bothin-distribution and
+dence  to:   Yu  Wang  <yu-wang@tsinghua.edu.cn>,  Chao  Yu                     out-of-distribution settings.
+<zoeyuchao@gmail.com>.
+
+Preprint. January 30, 2026.
+
+                                                                       1
+
+===== PAGE 2 =====
+
+                            πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+1. Introduction                                                           process (MDP) for exact log-likelihood estimation.Flow-
+Vision-Language-Action(VLA)models(Dinetal.,2025)                          SDEconverts the ordinarydifferential equation (ODE)de-
+have emerged as a leading solution for general-purpose                    noisingprocessintoastochasticdifferentialequation(SDE)
+robots,effectivelybridgingthegapbetweenhigh-levelmul-                     whilemaintainingequivalentmarginaldistributionsforex-
+timodal reasoning and low-level physical control (Firoozi                 ploration,and buildsatwo-layer MDPthatcouples thede-
+et al.,2025). Conditioned on sensor inputs and language                   noising process with policy-environment interaction. Given
+commands, VLAs (Team et al.,2024;Kim et al.,2024;                         theformulated MDPand theexact log-likelihoodcomputa-
+Black et al.,2024;Intelligence et al.,2025) can translate                 tion,πRL undergoes further optimization via the proximal
+abstractinstructionsintoexecutableroboticactions,thereby                  policy optimization (PPO) (Schulman et al.,2017).
+enabling intuitive and flexible human-robot interaction.                  Weconductextensiveexperimentsonvariousbenchmarks
+The training methodology for VLAs follows the standard                    to evaluate the effectiveness of πRL on π0 (Black et al.,
+pre-training and supervised fine-tuning (SFT) paradigm                    2024) and       π0.5   (Intelligence et al.,2025) models. Across
+as shown in Fig.1.   Building on the pretrained Vision-                   allbenchmarks,theproposedframeworkconsistentlyyields
+Language Model (VLM) (Touvron et al.,2023;Beyer et al.,                   substantialperformancegainsoverSFTbaselines. Further-
+2024),VLAsarefine-tunedonlarge-scale,heterogeneous                        more,outofdistributionevaluationsconfirmthatourmodel
+human demonstrationdatasets (O’Neill etal.,2024;Khaz-                     yields genuine policy enhancement rather than narrow over-
+atsky et al.,2024), followed by SFT on the target task to                 fitting on the target environment.
+align their capabilities with the specific embodiment and                 To sum up, our contributions are:
+environment. However,relianceonSFTintroducesacritical
+challenge: curating large-scale, high-quality expert trajecto-               •  RLforflow-basedVLAs.Weintroduce         πRL,anonline
+riesisbothlaboriousandcostly(Dinetal.,2025). Besides,                           RLfine-tuningframeworkwithFlow-NoiseandFlow-
+modelsobtainedviaSFTtendtooverfittoexpertdemonstra-                             SDE formulations for flow-based VLAs.
+tions (Fei et al.,2025), with their performance fundamen-                    •  Superior Performance.We demonstrate significant
+tally constrained by the quality of expert demonstrations.                      performanceimprovementsand enhancedgeneraliza-
+Recentefforts (Zangetal.,2025;Liet al.,2025a;Tanet al.,                         tion ofπ   RL across various benchmarks.
+2025;Liuetal.,2025a)haveexploredexpandingtheVLA
+training process with reinforcement learning (RL), estab-                    •  ComprehensiveAblation.Weconductthoroughabla-
+lishing a pre-training, SFT, and RL paradigm as shown in                        tionstudies, offeringempiricalinsights toguidefuture
+Fig.1,allowingVLAstoimprovetheirperformancebeyond                               RL research on flow-based VLAs.
+expert demonstrations through environmental interaction                      •  Open-sourceCodeand Models.Werelease allcodes
+and develop more generalizable policies.                                        to ensure reproducibility, hoping that our study helps
+However, these RL advances have been largely confined                           to advance further research in this field.
+to autoregressive VLAs, featuring OpenVLA (Kim et al.,
+2024)andOpenVLA-OFT(Kimetal.,2025),whichemploy                            2. Related Work
+discrete action decoders that generate output in an autore-
+gressive or parallel fashion. This stands in stark contrast               2.1. Vision-Language-Action Models
+to flow-based VLAs, exemplified by the π series models,                   VLA models have recently achieved remarkable progress in
+whichgenerateactionsthroughiterativerefinementinflow                      roboticsbyintegratingmultimodalinputstoenableunified
+matching(Lipmanet al.,2022),offeringtheadvantagesof                       perception, reasoning, and control. This development has
+generating action chunks in high-frequency and performing                 ledto aseries ofarchitectures,including Octo(Team etal.,
+highly dexterous tasks (Black et al.,2024). Consequently,                 2024),RT(Brohanetal.,2022),OpenVLA,OpenVLA-OFT,
+previous VLA-RL algorithms are incompatible with flow-                    π0,π 0.5  , and GR00T (Bjorck et al.,2025).
+based VLAs, and the fundamental challenge lies in how
+to characterize a logarithmic likelihood (Hutchinson,1989;                2.2. Online RL Fine-tuning for VLA Models
+Chen et al.,2018) for the executed actions.
+In this paper, we introduceπRL, a frameworkdesigned for                   Recent research has increasingly focused on enhancing the
+fine-tuningflow-basedVLAswithonlineRLalgorithms. To                       performance and generalization of VLAs with online RL.
+addresstheintractablelog-likelihoodestimationproblemin                    For example, SimpleVLA-RL (Li et al.,2025a), building
+flow matching, we propose two solutions.Flow-Noiseinte-                   on the OpenVLA-OFT and GRPO, demonstrated that RL
+gratesalearnablenoisenetworkintothedenoisingprocess                       can improve long-horizon planning of VLA models un-
+and models this stage as a discrete-time Markov decision                  derdatascarcity. RL4VLA(Liuetal.,2025a)empirically
+                                                                          evaluatedPPO,GRPO,anddirectpreferenceoptimization
+
+                                                                      2
+
+===== PAGE 3 =====
+
+                             πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+(DPO) (Rafailov et al.,2023) with stage-based sparse re-                    robot proprioception to a sequence of H future actions
+wards.  RLinf-VLA (Yu et al.,2025;Zang et al.,2025)                         At = [a t,0  ,...,at,H−1      ], formulated as p(A   t|o t).  Within
+providesa unifiedandefficientframework forscalableRL                        the model, the VLM extracts features from the visual and
+training of VLA models.  These works demonstrate the                        language inputs, while the flow matching expert is tasked
+effectiveness of RL fine-tuning VLA models.                                 with generating the actions. Specifically, the model learns a
+                                                                            conditionalvectorfieldvθ thattransformsa standardGaus-
+2.3. RL Fine-tuning for Flow Models                                         sian noise distribution into the target action At.  This is
+Integrating RL with flow models is a promising way to                       achieved by minimizing the Conditional Flow Matching
+transcendthelimitationsofimitationlearning. Tothisend,                      (CFM)loss,whichalignsthepredictedvectorfieldvθ with
+Flow-GRPO (Liu etal.,2025b)converts thedeterministic                        the ground-truth vector fieldu:
+
+ODEintoanequivalentSDEtoenablestochasticityexplo-                                                               h                                   i
+ration,afoundationuponwhichsubsequentworkslikeMix-                          LCFM =E   τ,p(A    t,o t),q(A     τt|A t)∥v  θ(A τt,o t)−u(A         τt|A t)∥ 22.
+GRPO (Li et al.,2025b) and TempFlow-GRPO (He et al.,                                                                                            (3)
+2025) further accelerate training through hybrid ODE-SDE                    Here, the conditional probability pathq(A   τt|A t) generates
+rollouts.  ReinFlow (Zhang et al.,2025) injects learnable                   a noisy action1Aτt =τA     t+(1−τ)ϵ           from an actionAt,
+noise into the flow path and transforms it into a discrete-                 randomnoiseϵ∼N(0,I)          ,andacontinuoustimeτ∈[0,1]
+time Markov process with a tractablelikelihoodfor stable                    in flow matching. For this specific path, the corresponding
+policy gradient updates. Flow policy optimization (FPO)                     ground-truthvectorfieldisdefinedasu(A    τt|A t)=A   t−ϵ   .
+(McAllister et al.,2025) reframes policy optimization as                    During the inference, the action sequence is generated by
+maximizing theadvantage-weightedratio ofthe conditional                     firstsamplinganoisevectorA0t ∼N(0,I)        ,whichisfurther
+flow matching loss.                                                         iterativelyrefinedbyintegratingthelearnedvectorfieldvθ
+3. Preliminary                                                              over a fixed number of steps based on the forward Euler
+                                                                            method:A             τ+δt     =A   τt +v   θ(A τt,o t)·δ.
+3.1. Problem Formulation
+We formulate the task as an MDP, defined by a tuple                         4. Methodology
+M= (S,A,P              0,PENV,RENV,γ)  . The state st ∈ S is de-            Existing VLA-RL approaches leverage base models such
+finedastherobotobservationot andP0 denotestheinitial                        as OpenVLA for discrete actions and OpenVLA-OFT for
+statedistribution. Giventhestate,theflowpolicypredicts                      continuous actions. To compute the action log-likelihood
+anactiona          t∼π(·|s         t)∈A,resultinginthestatetransition       logπ     θ(a t|s t), discretemodels (Liuet al.,2025a)apply soft-
+st+1 ∼P    ENV(·|s    t,at) and a rewardRENV(s t,at). The ob-               maxtotheoutputlogits, whilecontinuousmodels(Lietal.,
+jectiveistolearn apolicyπθ thatmaximizesthe expected                        2025a) treat the action as a Gaussian distribution, employ-
+γ-discounted return over a horizon ofT+1:                                   ing a prediction head to estimate the variance. As for the
+                                " TX                     #                  flow-basedVLAs,directlycomputingtheexactlikelihood
+           J(π    θ)=E   πθ,P0        γtRENV(s t,at)       .         (1)    (Hutchinson,1989)isinaccuratewithfewdenoisingsteps.
+                                  t=0                                       Moreover, the deterministic nature of its ODE sampling
+                                                                            process precludesexploration,making its implementation
+With the policy gradient surrogate (Williams,1992), the                     within RL non-trivial. To this end, we proposeFlow-Noise
+gradientofthereturnexpectationcanbeapproximatedfrom                         and Flow-SDE, two technical approaches that make flow-
+sampled trajectories:                                                       based VLAs amenable to RL.
+                           " TX                                  #
+  ∇θJ(π    θ)=E   πθ,P0           ∇θlogπ     θ(a t|s t)A(s      t,at).      4.1. Flow-Noise
+
+                             t=0                                            InspiredbyReinflow(Zhangetal.,2025),weincorporatea
+                                                                   (2)      learnable noise network into the flow matching denoising
+The advantage function, A(s    t,at) =Q(s        t,at)−V(s         t),      processandsolvetheproblemwithinthestandardone-layer
+measures the relative merit of the action value Q(s     t,at)               MDP framework detailed in Sec.3.1.  By modeling the
+overthestatevalueV(s    t),providingalow-variancesignal                     denoising stage as a discrete MDP, we can directly com-
+for the policy update.                                                      putethelog-likelihoodofthedenoisedsequence,enabling
+3.2. Flow-based Vision-Language-Action Model                                equivalent policy optimization via RL.
+
+                                                                                1Aτt incorporatestwotemporalindices,tdenotesthediscrete
+A flow-based VLA modelπθ is designed to map the obser-                      time step for environment interaction andτ represents the continu-
+vationot comprising RGB images, language tokens, and                        ous time variable in flow matching.
+
+                                                                         3
+
+===== PAGE 4 =====
+
+                             πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+       Figure 2.Illustration for the noise injection inπ       RL.
+
+
+4.1.1. STOCHASTICITYINJECTION                                                      Figure 3.Illustration of the MDP formulations inπ       RL.
+In Flow-Noise, we parameterize the noise schedule with
+a neural network, allowing the magnitude of the injected
+noisetobelearneddynamicallyduringtrainingforgreater                          entire denoising sequenceA= (A     0,...,A 1) is depicted
+flexibility,as shown inFig.2. We focuson thegeneration                       in Fig.3and formulated as:
+process within a single environment timestept. For nota-                                                                                      !
+tionalsimplicity,weomitthetimesubscriptt,e.g.,writing                                                              K−1Y
+Aτ, and denote the predicted velocityv           θ(A τ,o)asv        τ.         logπ(A|o)=log           π(A    0|o)       π(A    τk+1 |A τk,o)    .
+                                                                                                                   k=0
+The step transition during the denoising process is mod-                                                                                         (5)
+eledasaGaussiandistributionp(A   τ+δ  |A τ)∼N(µ      τ,Σ τ),                 Building on this, we can treat flow-based policy optimiza-
+where themean is determined bythe forward Eulerupdate                        tion within a standard MDP framework.
+of the original ODE and the variance is controlled by the
+learnable noise networkθ    ′:                                               4.2. Flow-SDE
+                     (
+                       µτ =A   τ +v   τ ·δ                                   Inspired by Flow-GRPO (Liu et al.,2025b), we enhance
+                       Στ =diag(σ            2θ′)       .                      (4)stochasticexplorationbyconvertingthedenoisingprocess
+Here,σθ′(·)   isthestandarddeviationlearnedfromthenoise                      fromODEintoanSDEformulation. Wefurtherconstruct
+injection network, conditioned on the actionAτ, and the                      atwo-layerMDPtocouplethedenoisingprocesswiththe
+observationo. Thenoisenetworkistrainedjointlywiththe                         policy-environment interaction following DPPO (Ren et al.,
+velocitybutdiscardedafterfine-tuning,leavingadetermin-                       2024), while leveraging the hybrid ODE-SDE sampling
+istic policy for inference.                                                  technique to accelerate the training process.
+
+4.1.2. LOG-LIKELIHOODESTIMATION                                              4.2.1. STOCHASTICITYINJECTION
+The primary challenge in applying policy gradient meth-                      In Flow-SDE, we convert the deterministic ODE into an
+ods to flow-based VLAs stems from the intractable log-                       equivalent SDE thatpreserves themarginal probabilityden-
+likelihood of the final executed action.   In Flow-Noise,                    sity of the generated actions, as shown in Fig.2.
+we address it by substituting the gradient of the joint log-                The deterministic ODE sampling trajectory of the flow
+likelihood of the entire denoising process into the policy                   matching,especiallytheRectifiedFlow(Liuetal.,2022),is
+optimization objective in Eq. (2), which is theoretically                    described by the forward Euler method:
+grounded in Reinflow (Zhang et al.,2025).
+The inference process for action generation is discretized                                              dA  τ =v   τdτ.                              (6)
+
+into K uniform steps, which defines a sequence of time
+points{τ  0,τ1,...,τK}. With the step interval defined as                    Building on the connection between theprobability flow
+δ=1/K    ,thediscretetimestepatthek-thpointisτk =k·δ      ,                  ODE and SDE (Song et al.,2020), we can transform the
+startingfromτ0 =0 andculminating atτK =1. Giventhe                           deterministicODEinEq.(6)intoanequivalentSDE,witha
+observationo,theexactandtractablelogprobabilityforthe                        drift term that corrects the original velocity and a diffusion
+
+                                                                         4
+
+===== PAGE 5 =====
+
+                               πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+term that introduces noise:                                                            Forτ <1   , the inner loop transitionPFLOW(·)   occurs
+                                                                                       between different denoised action states, where the
+ dA  τ =      vτ − 12g2(τ)∇logq              τ(A τ)dτ  +g(τ)dw| {z   }  ,              observationot remains fixed and the next action state
+           |                    {z                   }    Diffusion Term               is set by¯a      τt =A   τ+δt    .
+                            Drift Term                                                 Forτ=1 ,thefinalaction¯a  τt =A   1t interactswiththe
+                                                                       (7)             outer-loopenvironment,resultinginanewobservation
+whereg(τ)      is a scalar function controlling the noise sched-                       ot+1  accordingto theenvironmentdynamicsP                     ENV(·).
+ule,∇logq        τ(A τ) is the score function of the marginal dis-                     Concurrently,the action state is resetfrom a standard
+tributionq        τ anddwdenotes a Wiener process.                                     normal distributionA        0t+1 ∼N(0,I).
+As established in Flow-GRPO, the score function and
+the velocity field are critically linked by∇logq        τ(A τ) =                    •  Reward ¯R(¯s     τt,¯a   τt)isgrantedonlyuponcompletionof
+−Aττ  − 1−ττ  vτ.  By substituting the score function with                             the denoising process and interaction with the environ-
+the velocity field in Eq. (7) and setting the noise scheduleq                          ment:
+g(τ)      to στ =a        τ                                                                                  (
+                        1−τ      with a controlling the noise level,                         ¯R(¯s     τt,¯a   τt)=0                      ifτ <1
+we derive the final SDE formulation for the flow-matching                                                      RENV(o t,A 1t)  ifτ=1     .     (12)
+sampler:
+                                                                                Withinthetwo-layerMDPframework,theproblem ofesti-
+ dA  τ =     vτ + σ2τ2τ   (A τ +(1−τ)v          τ)  dτ+σ       τdw  τ. (8)      matingtheactionlog-likelihoodlogπ(a         t|s t)istransformed
+                                                                                into estimating logπ(¯a         τt|¯s   τt), which is straightforward to
+Discretizing this SDE reveals that the transition probabil-                     compute due to the Gaussian nature of the transitions.
+ity p(A   τ+δ  |A τ)∼ N(µ      τ,Σ τ) is an isotropic Gaussian
+distribution, with the mean and variance formulated as:                         4.2.3. HYBRIDODE-SDE SAMPLING
+  (µτ =A   τ +       h                                    i                     The two-layer MDP formulation significantly extends the
+                      vτ + σ22τ  (A τ +(1−τ)v          τ)τ  ·δ                  horizon, increasing training difficulty and computational
+
+     Στ =σ   2τδ·I                                                   .  (9)     cost. Tomitigatethis,weadoptamixedODE-SDErollout
+                                                                                strategy (Li et al.,2025b;He et al.,2025). At each step                           t,
+4.2.2. MDP FORMULATION                                                          we randomly sample a denoising timeτt for the stochastic
+Wecouplethedenoising processofthe flowmatchingwith                              SDE exploration, while treating all remaining denoising
+environmental interaction in Flow-SDE. Specifically, we                         stepsasdeterministicODEupdates. Specifically,thepolicy
+embedtheinnerMDPdefinedduringthedenoisingprocess                                actsonthe state¯s         τtt  =(o t,A τtt );subsequently, anenviron-
+into the high-level, outer-loop MDP with the environment                        ment wrapper executes the remaining ODE steps and the
+MENV in Sec.3.1, formulating a two-layer MDP as shown                           environment transition, ultimately yielding the next state
+inFig.3,withcomponentsdefinedwithrespecttotheenvi-                              ¯s  τt+1t+1   =(o t+1 ,A τt+1t+1  ) at anewlysampled timeτt+1 . This
+ronment timetand denoising timeτ.                                               formulation effectively shortens the MDP horizon while
+                                                                                maintaining theoretical consistency with the original two-
+   •  State ¯s  τt =(o t,A τt) isthe tupleof theobservationot                   layer framework.
+
+      and the action stateA       τt.                                           4.3. Policy Optimization
+   • Action ¯a  τt  is defined as the next sampled denoised                     4.3.1. ALGORITHM
+      action in the inner-loop andthe executedaction for the
+      outer loop:                                                               Given the formulated flow policy MDP, our objective is
+                               (                                                to learn the optimal parameters θ∗ for the policy πθ that
+                        ¯a  τt =  Aτ+δt        ifτ <1                           maximizes the expected discounted returnJ(π    θ). To this
+                                  A1t        ifτ=1    ,              (10)       end,weapplythewidelyadoptedpolicygradientalgorithm
+                                       √                                        PPO to optimize the policy.
+      where Aτ+δt     =µ   τ +σ   τ       δ·ϵ  , ϵ∼ N(0,I)            is the    π-seriesmodels(Blacketal.,2024;Intelligenceetal.,2025)
+      randomly sampled noise.                                                   adoptachunk-basedapproachforactiongeneration. Specif-
+   • Transition ¯P(¯s    τ′t′|¯s   τt,¯a   τt)defineshowthestateevolves,        ically, the policy outputs an entire sequence of H future
+      formulated as:                                                            actionsAt = [a t,0  ,...,at,H−1      ] in response to each obser-
+                           (                                                    vation.  In this approach, we treat the entire sequence as
+                   ¯s  τ′    (o t,¯a   τt)           ifτ <1                     a single macro-step and define its corresponding reward
+                    t′ =     (o t+1 ,A 0t+1 )  ifτ=1     .        (11)          Rt =PH−1
+                                                                                            j=0   rt,j as the sum of the per-step rewards rt,j,
+
+                                                                             5
+
+===== PAGE 6 =====
+
+                              πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+         (a)Critic with the action expert, exemplified byπ          0.                 (b)Critic with the VLM, exemplified byπ          0.5  .
+                                        Figure 4.Illustration of the two critic placement configurations.
+
+
+referred to as the chunk-level formulation in RLinf-VLA                       Vvlm(o t)conditionedontheintegratedimage,language,and
+(Zang et al.,2025).                                                           state inputs. Conversely, for theπ0 variant, achieving the
+Toeffectivelyguidepolicyupdates,PPOemploysGeneral-                            valuepredictionisnon-trivialduetothecoupledinputstruc-
+izedAdvantageEstimation(GAE)(Schulmanetal.,2015)                              ture, where the action expert requires both the noisy action
+tocompute alow-variance estimateof theadvantage,esti-                         Aτt and the state. To this end, we approximate Vexpert(o t)
+mated as:                                                                     by averaging the value estimates across theentire denoising
+                              T−tX                                            trajectory, formulated as:
+                        ˆAt =      (γλ)    kTt+k   ,                      (13)            Vexpert(o t)≈E    τ∼U[0,1]        [V expert(o t,A τt)].       (16)
+
+                              k=0
+wheretheTD-errorisTt =R   t+γV(s       t+1 )−V(s         t). Here,            5. Experimental Results
+V(·)      is the state-value function derived from the critic net-
+work,γ is the discount factor, andλ is the parameter that                     5.1. Setup
+balances the trade-off between bias and variance in the ad-
+vantage estimate.                                                             Benchmarks.We perform experiments on four widely-
+PPO constrains policy updates to a small trust region to                      adopted robot manipulation benchmarks: LIBERO (Liu
+prevent large, destabilizing updates, with the objective func-                etal.,2023),           ManiSkill (Taoetal.,2024),            MetaWorld
+tion:                                                                         (McLean et al.,2025) andCALVIN(Mees et al.,2022).
+                h                                                      i      Flow-based VLAs.We conduct our primary experiments
+J(π    θ)=E   t  min     ρt(θ)   ˆAt,clip(ρ         t(θ),1−ϵ,1+ϵ)                 ˆAt,based on π0 and π0.5    models.  Additionally, we conduct
+                                                                    (14)      experimentsonGR00TinAppendixSec.H,whichvalidates
+where the clip function, governed by a hyperparameter ϵ,                      thatouralgorithmcanbeappliedtootherflow-basedVLAs.
+restrictstheratioρt(θ)    totheinterval[1−ϵ,1+ϵ]              toensure
+training stability.                                                           5.2. Main Results
+Here, the probability ratioρt(θ)    between the updated and                   In this section, we assess the in-distribution (ID) perfor-
+old policies takes the form of either:                                        mance ofπRL across various benchmarks, followed by an
+  ρt(θ)=    πθnew(a t|s t)                                                    analysis of its out-of-distribution (OOD) generalization.
+              πθold(a t|s t)    orρ   t(θ)=    πθnew(¯a  τt|¯s   τt)πθold(¯a  τt|¯s   τt).  (15)
+                                                                              5.2.1. IN-DISTRIBUTIONRL TRAINING
+4.3.2. CRITICDESIGN                                                           As detailed in Tab.1,   πRL yields substantial performance
+Following VLA-PPO works (Zang et al.,2025;Liu et al.,                         gains over SFT baselines across all evaluated benchmarks.
+2025a), we employ a shared actor-critic architecture for                      Specifically,theπ0 modelachievesamaximumaverageim-
+memory-efficient value prediction as shown in Fig.4. How-                     provementof+29.2%,whiletheπ0.5   variantdemonstrates
+ever,thetwoflow-basedVLAsprocesstheproprioceptive                             a +31.0% increase in average success rate.
+state differently: inπ0, the state isfed into the action expert               SpecificallyforLIBERO,weperformfew-shotSFTonthe
+model, whereas in π0.5  , it is merged with prompt embed-                     π0.5   modelfollowedbyRLoptimizationtoachievea98.3%
+dings within the VLM.                                                         success rate, outperforming the 96.9% success rate of the
+Tothisend,fortheπ0.5   variant,weattachthecriticnetwork                       full-dataset SFTbaseline. Theseperformance gainsextend
+directly to the VLM output, providing the value estimate                      tootherchallengingenvironments,includingManiSkillwith
+
+                                                                           6
+
+===== PAGE 7 =====
+
+                               πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+                                Table 1.Comprehensive ID performance comparison across four benchmarks.
+
+  Model                                                                                                  Benchmarks
+                                         LIBERO          ManiSkill          MetaWorld          CALVIN          Avg.        ∆Avg.
+                 SFT                          57.6                   38.4                      50.8                     57.5               51.1           —
+  π0             Flow-SDE                96.1            78.8               78.1              61.7        78.7    +27.6
+                 Flow-Noise 97.6            77.8               85.8              59.9        80.3    +29.2
+                 SFT                          77.1                   40.1                      43.8                     61.3               55.6           —
+  π0.5           Flow-SDE                97.9            90.9                      70.7                     87.0               86.6    +31.0
+                 Flow-Noise 98.3            89.7                      66.1                     84.5               84.7    +29.1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                  (a)CALVIN                                          (b)ManiSkill                                       (c)MetaWorld
+
+     Figure 5.Comprehensive OOD evaluation results on CALVIN ABC-D, ManiSkill OOD, and MetaWorld ML45 benchmarks.
+
+
+its4,352 pick-and-placetaskcombinations, MetaWorld fea-                         5.3. Ablation Study
+turing 50 distinct manipulation primitives, and CALVIN                          Giventhat Flow-SDEachieves performancecomparable to
+forlong-horizon sequentialtasks. SeeAppendixSec.Cfor                            Flow-Noisewhileofferinghighercomputationalefficiency,
+comprehensive experimental details.                                             weconductourablationstudieswiththeFlow-SDEmethod.
+5.2.2. OUT-OF-DISTRIBUTIONRL EVALUATION                                         Specifically, we investigate the impact of critic designs,
+                                                                                noiseinjectionstrategies,andMDPformulations,withad-
+Whilepreviousexperimentsdemonstratethat RLyieldsper-                            ditional resultson RL algorithmsand hyper-parameterspro-
+formanceimprovements, acritical question remains:does                           vided in Appendix Sec.F.
+RL yield an enhanced policy, or simply overfit to the ID
+environment driven by provided rewards?In this section,                         5.3.1. CRITICDESIGN
+weevaluateRL-finetunedpoliciesinOODscenarios,where                              Placement.We compare two critic placement strategies,
+the environment distribution or the taskobjective deviates                      onepositionedaftertheactionexpert(Vexpert)andtheother
+from the ID training setup, to assess their generalization                      afterthe VLM(Vvlm),withπ0 modelon theLIBERO-Long
+capabilities.                                                                   task suite.  As illustrated in Fig.6, we observe that        Vvlm
+As illustratedin Fig.5,the performance gainsachieved in                         exhibitsslightlysuperiorperformance,lowervalueloss,and
+the ID setting effectively transfer to OOD scenarios in Man-                    higherexplainedvariance,despitenotreceivingthepropri-
+iSkillandCALVIN,wherethedomainshiftprimarilystems                               oceptive state as input.  This advantage can be attributed
+from environmental variations. Conversely, for the OOD                          to a key difference in their input: Vvlm learns a direct map-
+setting in MetaWorld, which involves distinct manipulation                      ping from observation to value, whileVexpert must contend
+tasks, performance fluctuates without showing significant                       with optimization challenges arising from coupled state and
+improvement. This findingsuggeststhat thebenefitsofRL                           noisy action inputs.
+areprimarilylocalizedtoaction-levelrefinementratherthan                         Nevertheless,toalignwiththeconceptofthevaluefunction,
+broader augmentation of cross-task generalization capabili-                     we maintaintheVexpert architecture fortheπ0, ensuringthat
+ties. See Appendix Sec.Dfor more details.                                       state information is incorporated to estimate the value.
+
+
+
+                                                                            7
+
+===== PAGE 8 =====
+
+                             πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+
+
+
+
+
+
+
+
+
+                      (a)Eval                                     (b)Value Loss                              (c)Explained Variance
+
+Figure6.AblationonthecriticdesignwithinFlow-SDE   π0 ontheLIBERO-Long,indicatingthatthecriticVvlm attachedaftertheVLM
+exhibits superior performance. Furthermore, a four-layer MLP demonstrates stronger regression capability inV    expert.
+
+
+
+
+
+
+
+
+
+
+
+
+                     (a)Eval                                 (b)Explained Variance                               (c)Update Time
+                        Figure 7.Ablation on the MDP formulation within Flow-SDE ofπ       0 on the LIBERO-Goal.
+
+
+
+
+
+
+
+
+
+
+
+
+                                     (a)Train                                                        (b)Eval
+                        Figure 8.Ablation on the injection strategy within Flow-SDE ofπ       0 on the LIBERO-Long.
+
+
+Structure.We investigate afour-layer MLP versusa one-                        time advantage over the standard two-layer model, stem-
+layerMLP,which mirrorstheaction-projectionstructurein                        ming from the requirement to recalculate full denoising
+the action expert. Results in Fig.6indicate that the four-                   trajectories for log likelihood estimation.
+layer MLP leads to a more accurate value approximation,
+resulting in enhanced performance and training stability.                    5.3.3. STOCHASTICITYINJECTION
+5.3.2. FLOWPOLICYMDP                                                        We compare fixed and learnable noise injection strategies
+                                                                             using the Flow-SDE MDP formulation on the LIBERO-
+Withthesamefixednoiseinjectionstrategy,weevaluatethe                         Longsuite. Toensurea controlledcomparison,weset the
+one-layer MDP of Flow-Noise with the two-layerMDP of                         entropy bonus for the learnable noise to zero, aligning it
+Flow-SDE on the LIBERO-Goal, as shown in Fig.7.                              with the fixed noise approach.
+Weobservethattheone-layerformulationconvergesmost                            Specifically,wesetthefixednoiseto0.5,andlowerandup-
+rapidly, but the final success rates remain consistent across                per bounds for the learnable noise log-variance to 0.08 and
+all three formulations. In terms of computational efficiency,                0.16. As depicted in Fig.8, two noise strategies exhibit sim-
+the hybrid two-layer paradigm achieves a2×   speedup over                    ilartrainperformanceatstep0,whichindicatescomparable
+thestandardapproachduetoitsshortereffectiveMDPchain.                         noisemagnitudes. Furthermore, theconvergedperformance
+Notably,theone-layerMDPyieldsnosubstantialwall-clock                         affirms the efficiency of both injection methods.
+
+
+                                                                         8
+
+===== PAGE 9 =====
+
+                                 πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+Table2.AblationstudyofhyperparametersforFlow-SDEontheLIBERO-Spatial.Trainreferstopolicyperformanceduringthestochastic
+rollout phase, whereasEvalrefers to performance during the deterministic evaluation phase.
+
+                                                                                     Hyperparameters
+Models        Stage                       Noise Level                                  Denoise Step                                Action Chunk
+                                  0.2           0.5          0.8            1             2             4             8             5            10           20
+
+  SFT           Train         62.3        56.0        46.6         9.4         28.3        56.1        62.6        56.0        60.7        70.3Eval         65.2        65.2        65.2        63.8        64.9        65.2        63.2        65.2        70.5        72.6
+
+   RL            Train         59.5        93.5        95.3        73.8        90.8        93.5        84.3        93.5        93.3        87.5Eval         73.1        94.5        98.1        88.5        97.0        94.5        86.7        94.5        95.5        89.2
+
+
+
+
+
+
+
+
+
+
+
+
+
+                     (a)Train                                                  (b)Eval                                          (c)Clipped Fraction
+                       Figure 9.Ablation on the noise levela, conducted with the Flow-SDEπ                        0 on the LIBERO-Spatial.
+
+
+
+
+
+
+
+
+
+
+
+
+                                          (a)Train                                                                (b)Eval
+
+                      Figure 10.Ablation on the denoise step, conducted with the Flow-SDEπ                    0 on the LIBERO-Spatial.
+
+
+
+
+
+
+
+
+
+
+
+
+                                           (a)Eval                                                       (b)Explained Variance
+                       Figure 11.Ablation on the chunk size, conducted with the Flow-SDEπ                    0 on the LIBERO-Spatial.
+
+
+5.4. Hyper-Parameters                                                                  tic actions for exploration, whereas the evaluation stage
+Building on the Flow-SDE withπ0 model, we investigate                                  involvesgeneratingdeterministicactions. Thetrainandeval
+the influence of the noise level, denoise step, and action                             success rates for the SFT baseline and the RL fine-tuned
+chunk on the LIBERO-Spatial benchmark. We denote the                                   model after 100 training steps are presented in Tab.2.
+train stageas thephase wherethe policygenerates stochas-                               NoiseLevel.Thenoiselevel   aintheFlow-SDEisdefinedin
+
+
+                                                                                   9
+
+===== PAGE 10 =====
+
+                            πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+Eq.(8),whichgovernsthenoiseinjectionmagnitudeduring                       Limitation.Due tothelowsample efficiency ofonlineRL,
+the denoising process. As shown in Tab.2, the evaluation                  ourframeworkcurrently relieson sim-to-realdeployment.
+performance of the SFT baseline remains identical across                  Weaim to developmore efficientalgorithms to enablereal-
+all noise levels due to its reliance on deterministic ODE                 world RL training in the future.
+sampling. Conversely, its training performance exhibits a
+clear degradation as noise increases.  This is intuitive, as              References
+higher noise levels can distort the flow trajectory, leading to
+aninaccurateestimationofthemarginalactiondistribution.                    Beyer, L., Steiner, A., Pinto, A. S., Kolesnikov, A., Wang,
+Extending this analysis to the RL fine-tuning stage high-                    X., Salz, D., Neumann, M., Alabdulmohsin, I., Tschan-
+lights a critical trade-off:while lower noise levels mitigate                nen,M.,Bugliarello,E.,etal. Paligemma: Aversatile3b
+exploration-induced performancedegradation, they simul-                      vlmfortransfer.arXivpreprintarXiv:2407.07726,2024.
+taneously constrain the capacity for RL refinement.This                   Bjorck,J.,Castañeda,F.,Cherniadev,N.,Da,X.,Ding,R.,
+trade-off is empirically supported by Fig.9, which shows                     Fan,L., Fang,Y., Fox,D., Hu,F.,Huang, S.,et al. Gr00t
+thattrainingwithminimalnoise(a=0.2     )leadstoinstabil-                     n1: An open foundation model for generalist humanoid
+ity, characterized by asignificantly higher clipfraction. We                 robots.arXiv preprint arXiv:2503.14734, 2025.
+attributethisinstabilitytothesubstantiallylargergradient
+magnitudes associated with low-noise regimes.                             Black, K., Brown, N., Driess, D., Esmail, A., Equi, M.,
+Denoise Step.The denoise step        K defines the number of                 Finn, C., Fusai, N., Groom, L., Hausman, K., Ichter,
+discretizationstepsforactiongenerationandiscriticalfor                       B., et al. π0: A vision-language-action flow model for
+controlling the fidelity of the ODE-to-SDE transition in                     generalrobotcontrol.arXivpreprintarXiv:2410.24164,
+Eq.(8). InTab.2,weobservethatwhileallconfigurations                          2024.
+
+start with similar eval performance, the train success rate               Brohan, A., Brown,N., Carbajal, J., Chebotar, Y.,Dabis, J.,
+plummetsatK=1   ,indicatinga significantODE-to-SDE                           Finn,C.,Gopalakrishnan,K.,Hausman,K., Herzog,A.,
+discretization error.                                                        Hsu,J.,etal. Rt-1: Roboticstransformerforreal-world
+However, alargerK is notunequivocallyoptimal. Asillus-                       controlatscale.arXivpreprintarXiv:2212.06817,2022.
+tratedin Fig.10, increasing         K presentsa distincttrade-off:        Chen, G., Li, Z., Wang, S., Jiang, J., Liu, Y., Lu, L., Huang,
+while it enhances rollout performance, it simultaneously                     D.-A., Byeon,W., Le, M.,Rintamaki, T., etal. Eagle 2.5:
+increases training complexity and computational overhead                     Boosting long-context post-training for frontier vision-
+due to the extended sequence of denoising steps.                             language models.arXiv preprint arXiv:2504.15271,
+Action chunk.The action chunk refers to the number of                        2025.
+consecutiveactionsthepolicyexecuteswithin asingleob-                      Chen,R.T.,Rubanova,Y.,Bettencourt,J., andDuvenaud,
+servation. We ablate the action chunk size across 5, 10, and                 D.K. Neuralordinarydifferentialequations.Advances
+20, with results visualized in Fig.11.                                       in neural information processing systems, 31, 2018.
+Although  a  larger  chunk  size  yields  marginal  perfor-               Chi, C., Xu, Z., Feng, S., Cousineau, E., Du, Y., Burch-
+mancegains,itinherentlyreducesthefrequencyofpolicy-                          fiel, B., Tedrake, R., and Song, S.   Diffusion policy:
+environmentinteractionsandobscurespreciserewardcredit                        Visuomotor policy learning via action diffusion.The
+assignment. These constraints lead to less reliable advan-                   International Journal of Robotics Research, 44(10-11):
+tageestimation,asevidencedbythediminishedexplained                           1684–1704, 2025.
+variance. Consequently,while anincreasedchunksize may
+offer a superior SFT baseline, it paradoxically limits the                Din,M.U.,Akram,W.,Saoud,L.S.,Rosell,J.,andHussain,
+ceiling for subsequent RL-driven refinement.                                 I. Visionlanguageactionmodelsinroboticmanipulation:
+                                                                             A systematic review.arXiv preprint arXiv:2507.10672,
+6. Conclusion                                                                2025.
+
+We introduce πRL, a framework that enables flow-based                     Fan, H., Dai, H., Zhang, J., Li, J., Yan, Q., Zhao, Y.,
+VLAs, π0 andπ0.5  , to be fine-tuned with online RL algo-                    Gao, M., Wu, J., Tang, H., and Dong, H.  Twinaligner:
+rithms. Wetackle the fundamentalchallenge of intractable                     Visual-dynamic  alignment  empowers  physics-aware
+log-likelihoodsinflowmatchingwithFlow-NoiseandFlow-                          real2sim2real for robotic manipulation.arXiv preprint
+SDE solutions. Our extensive experiments on the challeng-                    arXiv:2512.19390, 2025.
+ing benchmarksdemonstrated thatπRL achieves significant
+performance improvements over SFT baselines.                              Fei,S.,Wang,S.,Shi,J.,Dai,Z.,Cai,J.,Qian,P.,Ji,L.,He,
+                                                                             X.,Zhang, S.,Fei,Z.,et al. Libero-plus: In-depthrobust-
+
+                                                                      10
+
+===== PAGE 11 =====
+
+                            πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+  ness analysis of vision-language-action models.arXiv                    Li, H., Zuo, Y., Yu, J., Zhang, Y., Yang, Z., Zhang, K.,
+  preprint arXiv:2510.13626, 2025.                                           Zhu, X.,Zhang, Y.,Chen, T., Cui, G.,et al. Simplevla-rl:
+Firoozi,R., Tucker, J.,Tian, S.,Majumdar,A., Sun,J.,Liu,                     Scaling vla training via reinforcement learning.arXiv
+  W., Zhu, Y., Song, S., Kapoor, A., Hausman, K., et al.                     preprint arXiv:2509.09674, 2025a.
+
+  Foundation modelsin robotics: Applications,challenges,                  Li,  J.,  Cui,  Y.,  Huang,  T.,  Ma,  Y.,  Fan,  C.,  Yang,
+  and the future.The International Journal of Robotics                       M., and Zhong, Z.   Mixgrpo:  Unlocking flow-based
+  Research, 44(5):701–739, 2025.                                             grpo efficiency with mixed ode-sde.arXiv preprint
+Guo,    R.,    Lin,    X.,    Liu,    M.,    Gu,    J.,    and   Su,         arXiv:2507.21802, 2025b.
+  H.        Mplib:     a   lightweight   motion   planning   li-          Li,X.,Hsu,K.,Gu,J.,Pertsch,K.,Mees,O.,Walke,H.R.,
+  brary. https://github.com/haosulab/MPlib,                                  Fu, C., Lunawat, I., Sieh, I., Kirmani, S., et al. Evaluat-
+  2025.    URL https://motion-planning-lib.                                  ingreal-world robotmanipulationpoliciesin simulation.
+  readthedocs.io/latest/.                                                    arXiv preprint arXiv:2405.05941, 2024.
+
+He, X., Fu, S., Zhao, Y., Li, W., Yang, J., Yin, D., Rao, F.,             Li, Y., Wang, Y., Zhu, Y., Zhao, Z., Lu, M., She, Q., and
+  andZhang,B. Tempflow-grpo: Whentimingmattersfor                            Zhang, S.  Branchgrpo: Stable and efficient grpo with
+  grpo in flow models.arXiv preprint arXiv:2508.04324,                       structured branchingin diffusion models.arXivpreprint
+  2025.                                                                      arXiv:2509.06040, 2025c.
+
+Hu,E.J.,Shen, Y.,Wallis,P.,Allen-Zhu,Z.,Li,Y.,Wang,                       Lipman, Y., Chen, R. T., Ben-Hamu, H., Nickel, M., and
+  S.,Wang,L., Chen,W.,etal. Lora: Low-rankadaptation                         Le, M. Flow matching for generative modeling.arXiv
+  of large language models.ICLR, 1(2):3, 2022.                               preprint arXiv:2210.02747, 2022.
+
+Hutchinson, M. F. A stochastic estimator of the trace of the
+  influence matrix for laplacian smoothing splines.Com-                   Liu, B., Zhu, Y., Gao, C., Feng, Y., Liu, Q., Zhu, Y., and
+  munications in Statistics-Simulation and Computation,                      Stone,P. Libero: Benchmarkingknowledgetransferfor
+  18(3):1059–1076, 1989.                                                     lifelongrobotlearning.AdvancesinNeuralInformation
+                                                                             Processing Systems, 36:44776–44791, 2023.
+Intelligence, P., Black, K., Brown, N., Darpinian, J., Dha-
+  balia,K.,Driess,D.,Esmail,A.,Equi,M.,Finn,C.,Fusai,                     Liu,J., Gao,F.,Wei,B.,Chen,X., Liao,Q.,Wu,Y.,Yu,C.,
+  N.,etal. π0.5  : avision-language-actionmodelwithopen-                     and Wang, Y.  What can rl bring to vla generalization?
+  world generalization.arXiv preprint arXiv:2504.16054,                      an empirical study. arXiv preprint arXiv:2505.19789,
+  2025.                                                                      2025a.
+
+Jiang, G., Chang, H., Qiu, R.-Z., Liang, Y., Ji, M., Zhu, J.,             Liu, J., Liu, G., Liang, J., Li, Y., Liu, J., Wang, X., Wan,
+  Dong, Z.,Zou, X.,and Wang,X. Gsworld: Closed-loop                          P., Zhang, D., and Ouyang, W.   Flow-grpo:  Training
+  photo-realisticsimulation suiteforrobotic manipulation.                    flow matching models via online rl.arXiv preprint
+  arXiv preprint arXiv:2510.20813, 2025.                                     arXiv:2505.05470, 2025b.
+
+Kerbl,B.,Kopanas,G.,Leimkühler,T.,andDrettakis,G. 3d                      Liu, X., Gong, C., and Liu, Q.   Flow straight and fast:
+  gaussian splatting for real-timeradiance field rendering.                  Learning to generateand transfer data with rectifiedflow.
+  ACM Trans. Graph., 42(4):139–1, 2023.                                      arXiv preprint arXiv:2209.03003, 2022.
+
+Khazatsky,  A.,  Pertsch,  K.,  Nair,  S.,  Balakrishna,  A.,             McAllister,D.,Ge,S.,Yi,B.,Kim,C.M.,Weber,E.,Choi,
+  Dasari,S.,Karamcheti, S.,Nasiriany, S.,Srirama,M.K.,                       H., Feng, H., and Kanazawa, A. Flow matching policy
+  Chen,  L. Y.,  Ellis,  K.,  et al.    Droid:  A large-scale                gradients.arXiv preprint arXiv:2507.21053, 2025.
+  in-the-wild robot manipulation dataset.arXiv preprint
+  arXiv:2403.12945, 2024.                                                 McLean, R., Chatzaroulas, E., McCutcheon, L., Röder, F.,
+Kim, M. J., Pertsch, K., Karamcheti, S., Xiao, T., Balakr-                  Yu,T.,He,Z.,Zentner,K.,Julian,R.,Terry,J.,Woungang,
+  ishna,A.,Nair,S.,Rafailov,R.,Foster,E., Lam, G.,San-                       I., et al.  Meta-world+: An improved, standardized, rl
+  keti, P., etal. Openvla: An open-source vision-language-                   benchmark.arXiv preprint arXiv:2505.11289, 2025.
+  action model.arXiv preprint arXiv:2406.09246, 2024.                     Mees, O., Hermann, L., Rosete-Beas, E., and Burgard, W.
+
+Kim, M. J., Finn, C., and Liang, P.  Fine-tuning vision-                     Calvin: A benchmark for language-conditioned policy
+  language-action models: Optimizing speedand success.                       learningforlong-horizonrobotmanipulationtasks.IEEE
+  arXiv preprint arXiv:2502.19645, 2025.                                     RoboticsandAutomationLetters,7(3):7327–7334,2022.
+
+                                                                      11
+
+===== PAGE 12 =====
+
+                            πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+O’Neill,  A.,  Rehman,  A.,  Maddukuri,  A.,  Gupta,  A.,                Tao, S., Xiang, F., Shukla, A., Qin, Y., Hinrichsen, X.,
+  Padalkar,A.,Lee,A.,Pooley,A.,Gupta,A.,Mandlekar,                          Yuan, X., Bao, C., Lin, X., Liu, Y., Chan, T.-k., et al.
+  A., Jain, A., et al. Open x-embodiment: Robotic learning                  Maniskill3:  Gpu parallelized robotics simulation and
+  datasets and rt-x models:  Open x-embodiment collab-                      renderingfor generalizableembodied ai.arXivpreprint
+  oration 0.  In2024 IEEE International Conference on                       arXiv:2410.00425, 2024.
+  Robotics and Automation (ICRA), pp. 6892–6903. IEEE,                   Team, O. M., Ghosh, D., Walke, H., Pertsch, K., Black,
+  2024.                                                                     K.,Mees,O.,Dasari,S.,Hejna,J.,Kreiman,T.,Xu,C.,
+
+Peebles, W. and Xie, S.  Scalable diffusion models with                     etal. Octo: Anopen-sourcegeneralistrobotpolicy.arXiv
+  transformers. InProceedings of the IEEE/CVFinterna-                       preprint arXiv:2405.12213, 2024.
+  tional conference on computer vision, pp. 4195–4205,                   Touvron, H.,Lavril, T.,Izacard,G., Martinet,X., Lachaux,
+  2023.                                                                     M.-A., Lacroix, T., Rozière, B., Goyal, N., Hambro, E.,
+Pertsch, K., Stachowicz, K., Ichter, B., Driess, D., Nair,                  Azhar,F.,etal. Llama: Openandefficientfoundationlan-
+  S., Vuong, Q., Mees, O., Finn, C., and Levine, S. Fast:                   guage models.arXiv preprint arXiv:2302.13971, 2023.
+  Efficient action tokenization for vision-language-action               Wang,F.andYu,Z. Coefficients-preservingsamplingforre-
+  models.arXiv preprint arXiv:2501.09747, 2025.                             inforcementlearningwithflowmatching.arXivpreprint
+Rafailov, R., Sharma, A., Mitchell, E., Manning, C. D.,                     arXiv:2509.05952, 2025.
+  Ermon, S., and Finn, C.   Direct preference optimiza-                  Wen,J.,Zhu,Y.,Li,J.,Zhu,M.,Tang,Z.,Wu,K.,Xu,Z.,
+  tion: Your language model is secretly a reward model.                     Liu,N.,Cheng,R.,Shen,C.,etal. Tinyvla: Towardsfast,
+  Advancesinneuralinformationprocessingsystems,36:                          data-efficientvision-language-actionmodelsforrobotic
+  53728–53741, 2023.                                                        manipulation.IEEE Robotics and Automation Letters,
+Ren,A.Z.,Lidard,J.,Ankile,L.L.,Simeonov,A.,Agrawal,                         2025.
+  P.,Majumdar,A.,Burchfiel,B.,Dai,H.,andSimchowitz,                      Williams, R. J. Simple statistical gradient-following algo-
+  M. Diffusion policy policy optimization.arXiv preprint                    rithmsforconnectionistreinforcementlearning.Machine
+  arXiv:2409.00588, 2024.                                                   learning, 8(3):229–256, 1992.
+
+Schulman,J.,Moritz,P.,Levine,S.,Jordan,M.,andAbbeel,                     Yu, C., Wang, Y., Guo, Z., Lin, H., Xu, S., Zang, H.,
+  P.High-dimensionalcontinuouscontrolusinggeneralized                       Zhang, Q., Wu, Y., Zhu, C., Hu, J., et al.  Rlinf: Flexi-
+  advantageestimation.arXivpreprintarXiv:1506.02438,                        ble and efficient large-scale reinforcement learning via
+  2015.                                                                     macro-to-micro flow transformation.arXiv preprint
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and                    arXiv:2509.15965, 2025.
+  Klimov, O.   Proximal policy optimization algorithms.                  Zang,H.,Wei,M.,Xu,S.,Wu,Y.,Guo,Z.,Wang,Y.,Lin,
+  arXiv preprint arXiv:1707.06347, 2017.                                    H.,Shi,L.,Xie,Y.,Xu,Z.,etal. Rlinf-vla: Aunifiedand
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang,               efficient framework for vla+ rl training.arXiv preprint
+  H.,Zhang,M.,Li,Y.,Wu,Y.,etal. Deepseekmath: Push-                         arXiv:2510.06710, 2025.
+  ingthelimitsofmathematicalreasoninginopenlanguage                      Zhang, T., Yu, C., Su, S., and Wang, Y.  Reinflow: Fine-
+  models.arXiv preprint arXiv:2402.03300, 2024.                             tuning flow matching policy with online reinforcement
+Shukor, M., Aubakirova, D., Capuano, F., Kooijmans, P.,                     learning.arXiv preprint arXiv:2505.22094, 2025.
+  Palma,S.,Zouitine,A.,Aractingi,M.,Pascal,C.,Russi,
+  M., Marafioti, A., et al.  Smolvla: A vision-language-
+  action model foraffordable and efficient robotics.arXiv
+  preprint arXiv:2506.01844, 2025.
+
+Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-
+  mon, S., and Poole, B. Score-based generative modeling
+  through stochastic differential equations.arXiv preprint
+  arXiv:2011.13456, 2020.
+
+Tan,S.,Dou,K.,Zhao,Y.,andKrähenbühl,P. Interactive
+  post-training for vision-language-action models.arXiv
+  preprint arXiv:2505.17016, 2025.
+
+                                                                     12
+
+===== PAGE 13 =====
+
+                            πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+A. Appendix                                                               B.2. Implementation Details.
+This appendix provides additional technical details and ex-               Giventhatpre-trainedmodelsoftenstruggletogeneralizeto
+perimental results forπ     RL. The content is organized as:              task-specific benchmarks, weinitiate our process withSFT
+                                                                          on expert demonstrations. Forthe SFT stage, wefine-tune
+   •AppendixB: Experimental Setup.                                        theentire 3.3Bmodel followingthe officialsetting. In the
+                                                                          subsequent RL stage, we freeze the VLM parameters and
+   •AppendixC: In-Distribution RL Training.                               exclusively fine-tune the 300M action expert model, driven
+                                                                          byGPUmemoryefficiencyandthefindingsfromRL4VLA
+   •AppendixD: Out-of-Distribution RL Evaluation.                         thatRLcontributesmoresignificantlytoactiongeneraliza-
+                                                                          tion. We build the whole framework upon the RLinf (Yu
+   •AppendixE: Case Studies: Single-Task RL Training.                     etal.,2025)codebase, wherewe adopta shared,co-located
+                                                                          GPUallocationstrategythatplacestheenvironment,rollout
+   •AppendixF: Ablation Details.                                          model,andactormodelonthesameGPUandexecutesthem
+                                                                          serially.
+   •AppendixG: Insights from Large-Scale RL Training.                     Forthemodelconfigurations,weadheretotheofficialset-
+   •AppendixH: RL for GR00T N1.5.                                         ting provided by openpi (Black et al.,2024;Intelligence
+                                                                          etal.,2025). Inthese settings,           π0 utilizesimage, language,
+   •AppendixI: Limitations and Future Work.                               and proprioceptive states as input, whereas π0.5    notably
+                                                                          omits state information2. Our experiments are conducted
+   •AppendixJ: Training Hyperparameters.                                  on 8 NVIDIA H100 80GB GPUs, and detailed training
+                                                                          hyperparameters are available in the Appendix Sec.J.
+
+B. Experimental Setup                                                     C. In-Distribution RL Training
+B.1. Benchmarks.                                                          In this section, we evaluate the effectiveness of our frame-
+To rigorously assess the performance and generalization of                work across various benchmarks to demonstrate its robust-
+ourframework,weconductevaluationsacrossfourdiverse                        ness and superior performance in ID settings.
+benchmarks, with diverse emphases on robotic capability:
+                                                                          C.1. LIBERO Benchmark
+   •LIBERO   focuses  on  compositional  variations  and                  SFTProcedure.TheLIBERObenchmarkcomprisesfour
+     knowledgetransfer in tasks. By evaluatingacross four                 task suites, each consisting of 10 distinct subtasks. To fa-
+     tasksuites:Spatial,Object,Goal,andLong,it probes                     cilitatefew-shot SFTon LIBERO, aminimum of40 expert
+     the model’s ability to transfer base skills to variations            demonstrationtrajectoriesisnecessarytoensureapositive
+     in object arrangements and long-horizon tasks.                       successrateforeachsubtaskacrossfourtasksuites,thereby
+   •ManiSkill  emphasizes perceptual and execution ro-                    guaranteeing a positive optimization signal for the subse-
+     bustness under massive environmental diversity. We                   quent RL phase.
+     follow the setup of RL4VLA (Liu et al.,2025a) and                    We perform few-shot SFT following the official training
+     built a benchmark with 4,352 unique pick-and-place                   configurations. For theπ0 model,we fine-tuneona subset
+     combinations, which challenges the policy to main-                   of58trajectoriessampledfromthe1,692totaldemonstra-
+     tainphysicalinteractionsacrossavastdistributionof                    tions3, which serves as the initial checkpoint for subsequent
+     objects and receptacles.                                             RLtrainingontheSpatial,Object,andGoaltasksuites. For
+                                                                          theLongtasksuite, alargerpoolof208trajectoriesisem-
+   •CALVIN   evaluates long-horizon sequential reason-                    ployedtoaddressitsmorechallenging,long-horizonnature.
+     ing and vision-language grounding.  It evaluates the                 In contrast, for theπ0.5   model, benefiting from a superior
+     model’s capacity to execute chains of five random sub-               pre-trainedcheckpointandtrainingconfigurations,welever-
+     tasks in a persistent environment, requiring accurate                age only40 trajectories toprovidea unified few-shot SFT
+     alignment with linguistic instructions.                              checkpoint across all task suites.
+   •MetaWorld  measures skill breadth and multi-task                      RL Procedure.In RL, the VLA model receives a multi-
+     versatility.  It requires a single policy to master 50               modal input state comprising: an agent-view and a wrist-
+     semanticallydistinctmanipulationprimitives,ranging                       2https://github.com/Physical-Intelligence/openpi/issues/687
+                                                                              3https://huggingface.co/datasets/physical-intelligence/libero
+     from simple reaching to complex tool usage.
+
+                                                                      13
+
+===== PAGE 14 =====
+
+                                  πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+                         Table 3.Evaluation results on the LIBERO benchmark, evaluated based on the success rate (%).
+
+  Model                                                                                                         LIBERO
+                                                     Spatial              Object              Goal              Long              Avg.            ∆Avg.
+  # Full Dataset SFT
+  Octo                                                    78.9                   85.7                 84.6                51.1                75.1               —
+  OpenVLA                                           84.7                   88.4                 79.2                53.7                76.5               —
+  πfast                                                      96.4                   96.8                 88.6                60.2                85.5               —
+  OpenVLA-OFT                                  91.6                   95.3                 90.6                86.5                91.0               —
+  π0                                                        96.8                   98.8                 95.8                85.2                94.2               —
+  π0.5                                                        98.8                   98.2                 98.0                92.4                96.9               —
+  # Few-shot SFT + RL
+                       SFT                             65.3                   64.4                 49.8                51.2                57.6               —
+  π0                   Flow-SDE                   98.4                   99.4                 96.2                90.2                96.1        +38.5
+                       Flow-Noise                 99.0                   99.2                 98.2                93.8                97.6        +40.0
+  # Few-shot SFT + RL
+                       SFT                             84.6                   95.4                 84.6                43.9                77.1               —
+  π0.5                 Flow-SDE                   99.6                    100                  98.8                93.0                97.9        +20.8
+                       Flow-Noise   99.6                    100                  99.6                94.0                98.3        +21.2
+
+                 Table 4.Evaluation results on the ManiSkill benchmark, with more specific OOD results depicted in Tab.7.
+
+  Model                                                 IND                                                                   OOD
+                                              Avg.           ∆          Vision          Semantic          Execution          Avg.           ∆
+                    SFT                       38.4             —               32.6                  8.4                     13.2                18.1             —
+  π0                Flow-SDE            78.8    +40.4   61.1                 25.4                    31.5                39.3    +21.2
+                    Flow-Noise           77.8    +39.4   63.4                 23.1                    24.2                36.9    +18.8
+                    SFT                       40.1             —               40.2                 16.6                    22.4                26.4             —
+  π0.5              Flow-SDE 90.9    +50.8     68.0                 34.5                    45.4                49.3    +22.9
+                    Flow-Noise           89.7    +49.6   69.9                 35.5                    54.9                53.4    +27.0
+
+
+view,naturallanguageguidance,therobotendeffectorpose,                                    While the π0.5    few-shot SFT baseline achieves a decent
+andthegripperstate. Themodeloutputsanactiontointeract                                    average performance of 77.1%, it struggles with the chal-
+with the LIBERO environment, which provides a binary                                     lengingLongtasksuite,scoring only43.9%. Ourproposed
+rewardof 1for successfultaskcompletion and0 otherwise.                                   πRL rectifies this deficiency, boosting theLongtask success
+Experiments.We benchmark the performance of                     πRL,                     rate from 43.9% to 94.0%, constituting a 50.1% improve-
+which fine-tunes thefew-shot SFTπ0 andπ0.5   models with                                 ment.  Notably, despite using only a single trajectory for
+Flow-Noise and Flow-SDE, against several state-of-the-art                                SFT,πRL reaches98.3%finalperformance,surpassingthe
+VLAstrainedontheentireLIBEROdataset,includingOcto,                                       96.9% full-dataset SFT model.
+OpenVLA, OpenVLA-OFT,πfast (Pertsch et al.,2025),             π0,                        C.2. ManiSkill Benchmark
+and π0.5  . We conduct experiments on four LIBERO task
+suites and report performance as the success rateacross all                              SFT Procedure.In the ManiSkill benchmark, the policy is
+500 initial states (10 sub-tasks×50 states each).                                        requiredtopickfrom16objecttypesandplacethemonto
+Analysis.Forthefew-shot              π0 model,theSFTbaselineper-                         17 receptacles across 16 unique table scenes, yielding 4,352
+forms poorly, with an average success rate of only 57.6%,                                unique task combinations. Given the high complexity of
+indicating that the model struggles with limited demon-                                  thissetting,theSFTdatasetconsistsof16,384episodessyn-
+stration data. πRL substantially boosts performance, with                                thesized using the MPLib motion planning suite (Guo et al.,
+Flow-SDEandFlow-Noisereaching96.1%and97.6%,and                                           2025). To reinforce the concept of motion completion, 15
+surpassing the full-datasetπ                   0 SFT baseline of 94.2%.                  additionalframesareappendedtotheendofeachtrajectory.
+
+
+                                                                                    14
+
+===== PAGE 15 =====
+
+                                 πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+Table5.Evaluation results ontheCALVINbenchmark(SceneD), reporting theaveragecompletedsubtasksand successratesfortask
+sequences of length 1 to 5.
+
+  Methods                                                                                                CALVIN-D
+                                              Len-1           Len-2           Len-3           Len-4           Len-5            Avg.         ∆Avg.
+                    SFT                         94.7              84.9              74.3              65.2              57.5             3.766               —
+  π0                Flow-SDE               96.4              88.0              77.5              70.8              61.7             3.944  +0.178
+                    Flow-Noise             96.9              88.8              78.0              68.3              59.9             3.919  +0.153
+                    SFT                         92.7              84.3              76.7              68.8              61.3             3.838               —
+  π0.5              Flow-SDE   99.7              98.2              95.8              91.0              87.0             4.717  +0.879
+                    Flow-Noise             99.6              97.6              93.9              89.6              84.5             4.652  +0.814
+
+                                           Table 6.Evaluation results on the MetaWorld MT50 benchmark.
+
+  Methods                                                                                            MetaWorld-MT50
+                                                 Easy             Medium             Hard             Very Hard             Avg.          ∆Avg.
+  Diffusion Policy                             23.1                 10.7                   1.9                      6.1                    10.5                 —
+  TinyVLA                                        77.6                 21.5                  11.4                    15.8                   31.6                 —
+  SmolVLA                                       87.1                 51.8                  70.0                    64.0                   68.2                 —
+                     SFT                          77.9                 51.8                  53.3                    20.0                   50.8                 —
+  π0                 Flow-SDE    92.1          74.6                  61.7                    84.0                   78.1        +27.3
+                     Flow-Noise              91.1          81.8                  78.3                    92.0                   85.8        +35.0
+                     SFT                          68.2                 37.3                  41.7                    28.0                   43.8                 —
+  π0.5               Flow-SDE                86.4                 55.5                  75.0                    66.0                   70.7        +26.9
+                     Flow-Noise              86.8                 58.1                  63.3                    56.0                   66.1        +22.3
+
+
+RL Procedure.In RL, the VLA model receives a third-                                   structured "play data" across three distinct environments
+personRGBimage,aconciselanguageinstruction,andthe                                     (A, B, and C). This datasetincludes over 20,000 language-
+current joint proprioception. The environment provides a                              labeled trajectories covering 34 unique manipulation tasks.
+structured reward signal: 1.0 for correct object placement                            RL Procedure.Each episodeconsists of a sequenceof five
+and an auxiliary 0.1 reward for successful gripper-object                             randomly sampled subtasksto be completed insuccession
+attachment, intended to encourage stable manipulation and                             without environment resets. The rewardsignal is defined at
+mitigate undesired behaviors such as impulsive throwing.                              the subtask level,where the model receivesa sparse binary
+Experiments.Following the RL4VLA experimental pro-                                    reward of 1.0 for each successfully executed subtask and
+tocol, we conduct RL training on a comprehensive set of                               0.0 otherwise.
+4,352 task combinations and record the performance as the                             Experiments.Weevaluatetheperformanceof                   πRL inScene
+aggregate success rate across these tasks.                                            D over 1,000 episodes. Following the standard CALVIN
+Analysis.As detailed in Tab.4,                 πRL significantly boosts               evaluation protocol, we report two key metrics:  (1) the
+performance in the training environment. Specifically, the                            successratefortasksequencesofincreasinglengths,namely
+success rate of π0 increases from 38.4% to 77.8%, while                               Len-1toLen-5. (2) the average number of completed sub-
+π0.5    improves from 40.1% to 90.9%.  These gains under-                             tasks, denoted asAvg.per episode.
+score the efficacy of RL in complex settings.                                         Analysis.AsdetailedinTab.5,                πRL yieldssubstantialper-
+C.3. CALVIN Benchmark                                                                 formance gains in long-horizon sequential execution, par-
+                                                                                      ticularlywith theπ0.5   variant. The SFTmodelsinherently
+SFT Procedure.We conduct SFT on the CALVIN ABC                                        struggle with compounding errors across sequential tasks,
+dataset4, which comprises approximately 24 hours of un-                               withπ0.5   onlyachieving a61.3%success rateonLen-5se-
+
+    4https://huggingface.co/datasets/InternRobotics/InternData-                       quences. RLeffectivelymitigatesthisissuewiththeaverage
+Calvin_ABC                                                                            completedsub-tasksofFlow-SDEincreasingfrom3.838to
+                                                                                      4.717, and its Len-5 success rate surges to 87.0%.
+
+
+                                                                                 15
+
+===== PAGE 16 =====
+
+                                                 πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+                                                 Table 7.Specific generalization evaluation results in the ManiSkill OOD setting.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                 Notably, theperformancegap betweenSFTand RLwidens                                 D. Out-of-Distribution RL Evaluation
+                 significantly as the sequence length increases.  For π0.5  ,                      While previous experiments demonstrate significant RL-
+                 whileFlow-SDEshowsamodest7.0%improvementover                                      drivenimprovementsintheIDdomain,thissectionevalu-
+                 SFTinLen-1tasks,thegapexpandstoanimpressive25.7%                                  ates OOD generalization. As LIBERO lacks a dedicated in-
+                 in the most challenging Len-5 sequences.                                          terface for OOD testing, we utilize the ManiSkill, CALVIN,
+                 C.4. MetaWorld Benchmark                                                          andMetaWorldbenchmarkstoinvestigatewhethertheRL-
+                                                                                                   drivenimprovementsrepresentgenuineskillacquisitionthat
+                 SFTProcedure.WeperformSFTonthe   π0 andπ0.5   mod-                                scales tonovel settings,or merely reflectthe exploitation of
+                 elsusingtheofficialdataset5,whichconsistsof2500trajec-                            environment-specific biases.
+                 tories across 50 different manipulation tasks.
+                 RL Procedure.During the RL procedure, the VLA model                               D.1. ManiSkill
+                 processes a multi-modal input comprising a RGB agent-                             Setup.FollowingRL4VLA,weevaluatethemodel’sgen-
+                 view image, language guidance, the robot’s end-effector                           eralization across three challenging OOD scenarios:  (1)
+                 position, and its gripper state.  Based on this input, the                        Vision, challenging themodel with novelbackgrounds and
+                 model outputs an action to interact with the environment,                         textures; (2)Semantics, probing comprehension with un-
+                 whichinturnprovidesasparsereward: 1forsuccessfultask                              seenobjects,variedinstructions,andconfoundingelements
+                 completion and 0 otherwise.                                                       like extra objects or receptacles; (3)Execution, assessing
+                 Experiments.We benchmark the performance of                     πRL               robustness againstvaried initialstates,unseen robotposes,
+                 againstDiffusionPolicy(Chietal.,2025),TinyVLA(Wen                                 and dynamic disturbances.
+                 et al.,2025), and SmolVLA (Shukor et al.,2025).  For                              Results.In the OOD scenarios detailed in Tabs.4and7,
+                 the performance evaluation,  we follow the setup from                             we observe that the π0-SFT model demonstrates strong
+                 SmolVLA,i.e.,classifying50tasksintoeasy,medium,hard,                              generalization forvisual information. This can be attributed
+                 andvery hardfour categories accordingto their difficulties.                       to the robust foundation of its VLM, which allows it to
+                 Analysis.As detailed in Tab.6, RL fine-tuning substan-                            handle visual disturbances better.
+                 tiallyboostsperformance. Theπ0 andπ0.5   modelsachieve                            However, the semantic performance of π0 drops dramati-
+                 average success rates of 85.8% and 70.7%, respectively.                           cally. Thisdegradationislesspronouncedwhenswitching
+                 ThismarksasignificantimprovementovertheirSFT-only                                 to the π0.5    baseline, a benefit likely stemming from the
+                 counterpartsandsurpassestheSmolVLAbaselineof68.2%,                                knowledgegeneralizationofthepre-trainedπ0.5   model. Re-
+                 confirmingthatRLcaneffectivelyenhancemodelcapabili-                               gardingactionexecution,π0 exhibitsalargerperformance
+                 ties across a diverse range of manipulation task types.                           drop thanπ0.5  . Wehypothesize that this discrepancyarises
+
+                     5https://huggingface.co/datasets/lerobot/metaworld_mt50                       from the inclusion of joint angle states as input inπ0, lead-
+Environment              Variation-Version-Typeπ      0-SFT      π0-RL    π      0-RL       π0.5  -SFT     π0.5  -RL  π      0.5  -RLingto severeoverfittingin thecontroltask. Incontrast,π0.5
+                                                                            Flow-SDE    Flow-Noise                       Flow-SDE    Flow-Noise
+Indistribution             Main-v3-train                         38.4            78.8               77.8             40.1      90.9        89.716
+                            Instruct-v1-test                       30.1            64.6               66.5             46.6             77.0        85.7
+                            VisionImage-v1-test               38.3            68.8               71.7             46.2             78.8        83.1
+Visual-Language             VisionTexture03-v1-test         35.1            66.0               66.8             36.7             69.6        75.0
+Variations                  VisionTexture05-v1-test         31.0            55.8               60.5             32.7             58.0        62.2
+                            VisionWhole03-v1-test           35.4            62.4               69.0             40.1             69.6        71.6
+                            VisionWhole05-v1-test           28.5            49.0               53.9             30.7             55.0        57.0
+SemanticReasoning           MultiCarrot-v1-test                 7.8            28.2               23.0             16.7             36.8        38.2
+(object/receptacle          MultiCarrot-v1-train               12.5            36.5               31.8             28.2             49.5        50.1
+confounders)                MultiPlate-v1-test                   5.0            16.4               18.3             11.8      29.4        28.3
+                            MultiPlate-v1-train                  7.3            20.5               19.6              9.7              22.3        25.4
+
+ActionExecution        PositionChangeTo-v1-test        9.6            17.4               10.9             13.5             36.2        54.7Position-v1-test                      16.9            45.6               37.5             31.2             54.5        55.0
+
+===== PAGE 17 =====
+
+                              πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+                     Table 8.Evaluation results on the SIMPLER benchmark forπ         0 andπ       0.5   with Flow-Noise method.
+
+  Model                                                                                                       SIMPLER
+                                             Carrot                   Eggplant                   Spoon                   Cube                    Avg.
+                        SFT                      82.7                          87.5                         61.7                      37.1                     67.2
+  π0                    +RL              95.7                   96.7                  91.6                      63.0                     86.7
+                        ∆                     +13.0               +9.2                 +29.9          +25.9          +19.5
+                        SFT                      70.6                          91.9                         43.5                      31.0                     59.2
+  π0.5                  +RL                     82.0                   98.2                  82.8                      53.3                     79.1
+                        ∆                     +11.4               +6.3                 +39.3          +22.3          +19.9
+
+
+
+
+
+
+
+
+
+                        Figure 12.Real-world deployment of an RL refined policy performing a pick and place task.
+
+
+omits these inputs, thereby avoiding the same degree of                        Results.Under identical D         → D training settings, the RL
+performance degradation.                                                       finetunedpolicyintheABCenvironmentreachesa79.1%
+AsfortheRLtraining,althoughtheperformanceimprove-                              successrateintheOODsceneD,improvingoverthe61.3%
+ments in OOD scenarios are lower than those in IND set-                        SFTbaselineasshowninFig.5. Alignedwiththefindings
+tings,theproportionalimprovementsachievedarenotably                            in ManiSkill, this suggests that ID gains can be transferred
+comparable.  As indicated in Tab.4, for the   π0.5    model,                   to OOD settings characterized by visual variations.
+Flow-SDEenhancestheINDsuccessrateby126.7%,while                                D.3. MetaWorld
+theOODsimilarlyincreasesby102.3%. Thisconsistency
+in relative gains indicates that RL-driven optimization pro-                   Setup.WeutilizetheML45benchmarkfromMetaWorldto
+motes the acquisition of generalized action representations                    evaluatethetask-levelgeneralization. Thissetupconsistsof
+ratherthanmerelyoverfittingthetrainingenvironment,thus                         50 distinct robotic manipulation tasks: the agentis trained
+preserving efficacy under distribution shifts.                                 on 45 base tasks and subsequently evaluated on 5 held-
+Nevertheless, we observe a performance gap in relative                         out, unseen tasks, which require the model to generalize
+improvement between theVisionOOD tasks and the IND                             its learned manipulation primitives to entirely novel task
+domain.  Specifically, for π0.5  , the 73.9% gain in visual                    objectives and workspace configurations.
+generalization trails the 126.7% increase observed in the                      Results.As evidenced in the Fig.5, while success rates
+training environment. This discrepancy likely stems from                       show consistent gains within the ID domain, OOD perfor-
+freezing the VLM backbone during the RL stage for com-                         manceischaracterizedbypersistentoscillationthroughout
+putationalefficiency,whichrestrictsthemodel’sabilityto                         the training process. This instability indicates that RL, in
+adapt its visual grounding features to novel textures and                      its current form, struggles to foster stable cross-category
+backgrounds.                                                                   generalization.
+
+D.2. CALVIN                                                                    Nevertheless,themodelretainstheOOD skillslearneddur-
+                                                                               ingtheSFTphasethroughouttheRLtrainingprocess. This
+Setup.We evaluate environmental and visual OOD robust-                         highlightsasignificantadvantageoverstandardSFT,which
+ness based on the ABC→ D protocol in CALVIN. Under                             oftencausesthemodeltooverfitonexpertdemonstrations
+thissetting,the modelistrainedonABCenvironmentsand                             and lose its broader capabilities (Li et al.,2025a). Unlike
+evaluated in a zero-shot manner on Scene D. Scene D in-                        standard SFT,RL enablesID performance gainswhile pre-
+troduces significant distribution shifts in terms of visual                    serving the general knowledge, which indicates that RL
+textures, lightingconditions, and spatial layouts,effectively                  providesamorebalancedoptimizationthatmaintainsOOD
+assessingtheagent’sabilitytotransferskillstoanunfamiliar                       robustness without catastrophic forgetting.
+physical environment.
+
+
+                                                                           17
+
+===== PAGE 18 =====
+
+                              πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+                                Table 9.Comparison of the PPO and GRPO with Flow-SDE on the LIBERO.
+
+  Model                                                                                                       LIBERO
+                                           Spatial               Object               Goal               Long               Avg.            ∆Avg.
+                     SFT                        65.3                    64.4                  49.8                 51.2                57.6               —
+  π0                 +GRPO                 97.8                    97.8                  83.2                 81.4                90.0        +32.4
+                     +PPO                     98.4                    99.4                  96.2                 90.2                96.0        +38.4
+                     SFT                        84.6                    95.4                  84.6                 43.9                77.1               —
+  π0.5               +GRPO                 97.4                    99.8                  91.2                 77.6                91.5        +14.4
+                     +PPO           99.6                    100                  98.8                 93.0                97.9        +20.8
+
+
+D.4. Summary                                                                   E.2. Real2Sim2Real
+Inconclusion,ourOODevaluationdemonstratesthatRLen-                             While the SIMPLER benchmark demonstrates predictive
+hances performance for similar tasks but fails to generalize                   correlation between simulation and real-world performance,
+effectively to novel task objectives.                                          a pronouncedvisual domainshift remainsto besolved. To
+Specifically, RL training effectively enhances robustness                      thisend,weleveragerecentReal2Sim2Realmethodologies
+againstlow-levelvariationssuchasthevisualandexecution                          (Fan et al.,2025;Jiang et al.,2025) to construct a high-
+shifts observed in ManiSkill and CALVIN. This indicates                        fidelity simulation environment with ManiSkill for rigid
+that themodel acquires generalizedaction representations                       body dynamics and Gaussian Splatting (Kerbl et al.,2023)
+rather than merely overfitting to the training environment.                    for photorealistic rendering.
+Regarding high-level generalization on MetaWorld, the                          Setup.Our hardware platform comprises a Franka Panda
+modelsuccessfullyretainstheOODskillsinheritedfromthe                           robotic arm and an Intel RealSense D435 camera serving as
+SFT phase,demonstrating that RLavoids thecatastrophic                          theprimaryvisualsensor. Weperformmanualcalibration
+forgettingandoverfittingtypicalofstandardimitationlearn-                       by aligning simulated viewpoints with real-world camera
+ing. However,transferringitsperformancegainstoentirely                         perspectives to synchronize their extrinsic matrices.  As
+novel task objectives remains a significant challenge.                         illustrated in Fig.1, the photorealistic textures and color
+                                                                               profilesinoursimulatorcloselymirrorthephysicalenviron-
+                                                                               ment,effectivelyminimizingthevisualdomainshiftfrom
+E. Case Studies: Single-Task RL Training                                       simulation to reality.
+While thepreceding experiments focusedon performance                           Results.Following the experimental protocol established
+across multi-task benchmarks,  this section investigates                       intheManiSkillbenchmarks,weinitiallycollect20expert
+single-task scenarios where the VLA is trained to master a                     trajectories via a motion planner for few-shot SFT, which
+specifictaskwithina relativelystaticenvironment. Specifi-                      is subsequently optimized through RL over 100 training
+cally, we evaluate our approach on theSIMPLER(Li et al.,                       iterations. Wedeploy the RL fine-tunedpolicies in thereal
+2024) and aReal2Sim2Realenvironment.                                           worldin a zero-shotmanner. Empiricalresults indicatethat
+                                                                               while the SFT baseline fails to complete the task, the RL-
+E.1. SIMPLER                                                                   tuned policy achieves a 40% success rate. A representative
+Setup.In SIMPLER, the experimental setup comprises                             successful episode is visualized in Fig.12.
+
+an 8-DoF WidowX-250S arm evaluated on four standard                            F. Ablation Details
+tasks: (1)Spoon: placingaspoon onacloth. (2)Carrot:
+placing a carrot on a plate.  (3) Eggplant:  placing an                        F.1. RL algorithms
+eggplant in a basket. (4)Cube: stacking a cube. For the
+SFT stage, we employ a curated dataset in which each task                      Given the significant performance gains from PPO on the
+is trained with 144 demonstration episodes.                                    LIBERObenchmark,wealsoinvestigatedtheeffectiveness
+Analysis.As detailed in Tab.8,                 πRL increases the average       of GRPO (Shao et al.,2024), another widely used policy
+success rate of the π0 model from 67.2% to 86.7%, with                         gradient method applied in VLA+RL training (Li et al.,
+three tasks (carrot,eggplant, andspoon) exceeding                              2025a). WecomparetheperformanceofPPOandGRPOon
+90% success.                                                                   boththeπ0 andπ0.5   models,with resultsdenoted inTab.9.
+                                                                               Conclusion.To sum up, our findings highlight a critical
+
+
+                                                                          18
+
+===== PAGE 19 =====
+
+                             πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+
+
+
+
+
+
+
+
+
+                                     (a)Eval                                                  (b)KL Divergence
+                                     Figure 13.Ablation study on the effectiveness of VLM during RL.
+
+
+
+
+
+
+
+
+
+
+
+
+                                     (a)Eval                                                  (b)KL Divergence
+                                          Figure 14.Ablation study on the learning rate scheduler.
+
+
+trade-off:parameters tailored for rollout success may ad-                  LIBERObenchmark isnotevident. Weconjecturethelim-
+versely impact training stability, ultimately constraining the             ited performance gain owing to the limited scene variability
+performance ceiling of RL.Therefore, careful parameter                     withinLIBERO,forwhichthepretrainedVLMrepresenta-
+tuningisrequiredtoachieveasynergybetweenhigh-quality                       tions are already sufficiently robust.(2)Fine-tuning VLM
+rollouts and stable policy convergence.                                    togetherwiththeactionexpertrequiresamoreconservative
+                                                                           optimization configuration for training stability.
+F.2. VLM Fine-tuning Analysis
+In our previous experiments, the VLM is frozen, and the                    G. Insights from Large-Scale RL Training
+optimization is confined exclusively to the action expert                  In this section, we elaborate on some empirical insights we
+during RL. In this subsection, we aim to investigate the                   gained during RL training.
+roleoftheVLMduringRL.Specifically,weemployLow-
+Rank Adaptation (LoRA) (Hu et al.,2022) for the VLM,                       Hyperparameters.According to thehyperparameters abla-
+facilitating itsjoint optimizationwith the actionexpert. We                tiondetailedinSec.5.4,theperformancedisparitybetween
+set the LoRA rank tor= 32  and the scaling parameter to                    the trainand evalperformance of theinitial SFTcheckpoint
+α=32, while the action expert remains fully trainable.                     warrants close attention. If this disparity is significant, we
+Weconductexperimentswiththeπ0 modelwithFlow-SDE                            recommend either reducing the noise magnitude or increas-
+ontheLIBERO-Longbenchmark,comparingthreedistinct                           ing the number of denoising steps to mitigate the perfor-
+configurations:                                                            mance loss when shifting from deterministic to stochastic
+                                                                           execution. Furthermore, as previously established, lower
+                                                                           noise levels yield larger gradients, requiring a smaller learn-
+   •VLM Frozen:5e          −6   learning rate, 4 updates/epoch.            ing rate to maintain training stability.
+   •VLM LoRA-I:5e               −6   learning rate, 4 updates/epoch.       We also observed that when train performance improves
+                                                                           steadily while eval performance oscillates, increasing the
+   •VLM LoRA-II:1e                 −6   learning rate, 2 updates/epoch.    numberofdenoisingstepscanhelpalleviatethis,benefiting
+                                                                           fromreduceddivergenceintheactiondistributionsbetween
+As presented in Fig.13, the VLM LoRA-II configuration                      thedeterministicandstochasticactiongenerationprocesses.
+achievesalearningtrajectorycomparabletotheVLMfrozen                        Regardingtheactionchunk,weempiricallyfoundthatlong-
+baseline. This empirical observation yields two critical in-               horizontasks benefitfromlargerchunk sizes. For instance,
+ferences:(1)The benefit of fine-tuning the VLM on the                      we setthe chunk size to 10for LIBERO-Longand 5 for the
+
+                                                                       19
+
+===== PAGE 20 =====
+
+                             πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+
+
+
+
+
+
+
+
+                                     (a)Eval                                              (b)Explained Variance
+                                                  Figure 15.Training curves in ManiSkill.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                         Figure 16.Episode length:π                   0.5   RL training in ManiSkill.
+
+
+other sub-tasks.                                                           hances the policy’s error-correction capabilities, allowing
+Training.In our π0.5   experiments on the LIBERO-Long                      it to recover from execution failures.(2)Our partial reset
+benchmark, we observed that the Kullback–Leibler (KL)                      mechanism incentivizes temporal efficiency through dis-
+divergence metric increased steadily throughout training,                  countedrewards,asfastertaskcompletionenablestheagent
+potentiallyleadingtoinstability. Wemitigatedthisissueby                    totriggermoreresetsandaccumulatehighertotalrewards
+implementinga learningrate schedulerwith cosineanneal-                    within each update cycle.
+ing. AsdemonstratedinFig.14,thisschedulereffectively
+preventstheKLdivergencefromescalating,therebystabi-                        H. RL for GR00T N1.5
+lizing the training process.                                               H.1. Setup
+Critic.InourManiSkillexperiments,weobservethatpol-                         GR00T N1.5.We conduct additional experiments based
+icy evaluation performance exhibits an initial dip before                  on the GR00T N1.5 model (Bjorck et al.,2025), which is
+improvingforbothπ0 andπ0.5   models,asshowninFig.15.                       a foundation model tailored for generalist humanoid robot
+Weattributethistransientdegradationtothecriticproviding                    reasoningandmanipulation. Thearchitectureintegratesan
+inaccurate signals during its warm-up phase.  The subse-                   Eagle 2.5 VLM (Chen et al.,2025), optimized for spatial
+quent eval improvement correlates directly withthe critic’s                groundingand physicalreasoning,witha DiffusionTrans-
+value estimations stabilizing, as evidenced by the rising                  formerhead(Peebles&Xie,2023)foractiondenoising. It
+explained variance.                                                        facilitates multi-embodiment compatibility through special-
+Temporal Efficiency.We also study how the rollout of RL                    ized heads, supporting configurations such as humanoids
+in a physical simulator helps shape the policy to achieve                 with dexterous hands or grippers, as well as single-arm
+expert-leveltemporalefficiency. We analyzetheexpert mo-                    manipulators.
+tionplanningdatausedforSFTandthentrackedtheaverage                         Regardingthecriticimplementation,weestimatevaluefunc-
+episode lengths during the RL training of the π0.5   model                 tionsacrosstheentiredenoisingtrajectorybyintegratingthe
+inManiSkill. AsshowninFig.16, theSFT-initializedpol-                       criticnetworkdirectlywiththeactionhead. Thecomplete
+icyexhibitssignificantlylongerepisodesduetoexecution                       framework is illustrated in Fig.17.
+errors. In contrast,π0.5   achieves episode lengths that con-
+vergetotheexpertrangeafterRLtraining,demonstratinga                        Benchmark.WeevaluatethemodelperformanceofGR00T
+substantial improvement in temporal efficiency.                            across four manipulation task suites in LIBERO:Spatial,
+We attribute this convergence to two factors:(1)RL en-                    Object,Goal, andLong.
+
+
+                                                                      20
+
+===== PAGE 21 =====
+
+                              πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                           Figure 17.Illustration for the architecture of GR00T-N1.5.
+
+                            Table 10.Results of Finetuning GR00T using PPO with Flow-SDE on the LIBERO.
+
+ Model                                                                                                       LIBERO
+                                            Spatial               Object               Goal               Long               Avg.            ∆Avg.
+
+  GR00T                 SFT                    41.4                   58.6                  48.2                61.9                52.5               —+PPO                 92.5                   96.2                  84.3                86.6                89.9        +37.4
+
+
+
+ImplementationDetails.Similartothe           π0 implementation,               H.2. Results
+weinitiateourprocesswithSFTonexpertdemonstrations.                            ResultsaresummarizedinTab.10. Forthefew-shotmodel,
+For the SFT stage, we fine-tune the entire model following                    the SFT baseline achieves only a 52.5% success rate, re-
+the official setting. In the subsequent RL stage, we exclu-                   flectinglimited generalizationfrom sparsedemonstrations.
+sivelyfine-tunetheactionexpertmodelwhilekeepingthe                            Conversely,ourRL-basedFlow-SDEsignificantlyimproves
+vision-language model parameters fixed.                                       performance to 89.9%.  These results, obtained using de-
+A crucial methodological refinement in our RL pipeline is                     faultπ0 configurations,underscorethebroadapplicability
+thereplacementofdropoutlayersintheexpertmodelwith                             of our method across architectures.  While task-specific
+identity layers.  Dropout is widely recognized to induce                      tuning could further enhance performance, we leave such
+instabilityduringonline RLtraining. Specifically, itintro-                    optimization for future work.
+ducesnon-deterministicperturbationstotheeffectivepolicy,
+shifting the standard probability ratio update from:                          I. Limitations and Future Work
+
+                                                                              Noise Injection.Our current noise injection strategy ex-
+                       ρt(θ)=    πθnew(a t|s t)πθold(a t|s t)                        (17)hibitsaperformancedropduringtheODE-to-SDEconver-
+                                                                              sion.  Flow-CPS (Wang & Yu,2025) attributes this loss
+to a highly unstable form:                                                    to numerical error and proposes an improved coefficients-
+                                                                              preserving sampling method.  In our experiments, we at-
+                                                                              tempted this configuration.  Consistent with our hyperpa-
+                       ρt(θ)=    παnew(a t|s t)                               rameter ablation, our experiments showed that while this
+                                  πθold(a t|s t),                     (18)    configuration mitigated the ODE-SDE precision error, it
+                                                                              yielded limited RL improvement. Nevertheless, we argue
+where ρt(θ)    denotes the probability ratio, and αnew repre-                 that improving the noise injection strategy holds significant
+sentsthepolicystatepost-updateasmodifiedbythestochas-                         potential,specificallyconvertingtheODEformulationtoan
+ticdropoutmask. Thisstructuralstochasticity,compounded                        SDE formulation while preserving the action distribution
+withper-steppolicyupdates,severelyunderminestraining                          undisturbed.
+convergence. Thetraininghyperparameters areidenticalto                        Training Acceleration.Our current implementation of the
+thoseusedforπ0,withFlow-SDEemployedastheprimary                               mixed ODE-SDE rollout is simplisticin Flow-SDE,i.e., it
+RL algorithm.
+
+                                                                          21
+
+===== PAGE 22 =====
+
+                            πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+randomly selects one denoisingstep as an SDE step, while
+all other steps remain ODE steps.  We posit that future
+investigations into mixed ODE-SDE rollouts, leveraging
+advances in accelerating flow-based image generation (Li
+et al.,2025b;He et al.,2025;Liu et al.,2025b;Li et al.,
+2025c), could further enhance Flow-SDE, leading to faster
+training and improved performance.
+Generalization.Maniskill OOD tests indicate that the
+semantic generalization of SFT and RL models remains
+limited. To address this, future work will leverage RL to
+enhancerobustnessbytrainingonmorediversetaskdistri-
+butionsandvariedlinguisticinstructions,therebyfostering
+better cross-task adaptability.
+
+J. Training Hyperparameters.
+Werecordthetraininghyperparametersusedtotrainbothπ0
+andπ0.5   on eachbenchmark, andpresent themin Tabs.11
+to13.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                      22
+
+===== PAGE 23 =====
+
+                                           πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+                                                                        Table 11.Hyperparameters across LIBERO.
+
+                                                                                                                      Algorithms and Tasks
+Parameters                                                                                 π0                                                        π0.5
+                                                        Spatial          Object           Goal           Long           Spatial          Object           Goal           Long
+Train epochs                                       500                500               500             500               500                500               500             500
+Global batch size                               2048              2048             2048           2048             2048              2048             2048           2048
+Update epochs                                      4                    4                   4                 4                   1                    1                   3                 4
+Actor lr                                              5e-6               5e-6              5e-6            5e-6              5e-6               5e-6              5e-6            5e-6
+Critic lr                                              1e-4               1e-4              1e-4            1e-4              1e-4               1e-4              1e-4            1e-4
+Scheduler                                          False              False            False           False             False              False            False            True
+Reward discount rateγ                    0.99               0.99              0.99            0.99              0.99               0.99              0.99            0.99
+GAEλ                                             0.95               0.95              0.95            0.95              0.95               0.95              0.95            0.95
+Clip ratioϵ                                        0.2                 0.2                0.2              0.2                0.2                 0.2                0.2              0.2
+Interaction steps                                 240                240               320             480               240                320               320             480
+Parallel environments                          64                  64                 64               64                 64                  64                 64               64
+Rollout epochs                                     8                    8                   8                 8                   8                    8                   8                 8
+Action prediction horizonH           50                  50                 50               50                 10                  10                 10               10
+Action replan horizonH                         ′                     5                    5                   5                10                  5                    5                   5                10
+Denoise steps                                       4                    4                   4                 4                   3                    5                   5                 5
+Noise levelσ(Flow-SDE)                  0.5                 0.5                0.5              0.5                0.5                 0.3                0.3              0.5
+Max log-var (Flow-Noise)                 0.16               0.16              0.16            0.16              0.10               0.10              0.10            0.10
+Min log-var (Flow-Noise)                 0.08               0.08              0.08            0.08              0.04               0.04              0.04            0.04
+Entropy bonus (Flow-Noise)            0.005             0.005            0.005          0.005            0.005             0.005            0.005          0.005
+
+
+
+
+
+
+                                                           Table 12.Hyperparameters across SIMPLER and ManiSkill.
+
+                                                                                                                  Algorithms and Tasks
+Parameters                                                                              π0                                                        π0.5
+                                                  Eggplant    Carrot    Spoon    Cube    ManiSkill    Eggplant    Carrot    Spoon    Cube    ManiSkill
+SFT train steps                             1000         1000       1000      1000         1000            1000         1000       1000      1000         1000
+RL train steps                                 40             40           40         130           150               40             40           40          70            150
+Global batch size                          2560         2560       2560      2560         5120            2560         2560       2560      2560         5120
+Update epochs                                 4               4             4            4               4                  4               4             4            4               5
+Actor lr                                        5.6e-6       5.6e-6     5.6e-6    5.6e-6      7.91e-6         5.6e-6       5.6e-6     5.6e-6    5.6e-6      7.91e-6
+Critic lr                                        1.1e-4       1.1e-4     1.1e-4    1.1e-4      1.55e-4         1.1e-4       1.1e-4     1.1e-4    1.1e-4      1.55e-4
+Scheduler                                     False         False      False      False         False           False         False      False      False         False
+Reward discount rateγ               0.99          0.99        0.99       0.99          0.99             0.99          0.99        0.99       0.99          0.99
+GAEλ                                        0.95          0.95        0.95       0.95          0.95             0.95          0.95        0.95       0.95          0.95
+Clip ratioϵ                                   0.2            0.2          0.2         0.2            0.2               0.2            0.2          0.2         0.2            0.2
+Interaction steps                             48             48           48          48             48                48             48           48          48             48
+Parallel environments                    256           256         256        256           320              256           256         256        256           320
+Rollout epochs                                1               1             1            1               1                  1               1             1            1               1
+Action prediction horizonH       8               8             8            8               8                  8               8             8            8               8
+Action replan horizonH                         ′                5               5             5            5               5                  5               5             5            5               5
+Denoise steps                                  4               4             4            4               4                  4               4             4            4               4
+Noise levelσ(Flow-SDE)             0.5            0.5          0.5         0.5            0.5               0.5            0.5          0.5         0.5            0.5
+Max log-var (Flow-Noise)            0.16          0.16        0.16       0.16          0.16             0.10          0.10        0.10       0.10          0.10
+Min log-var (Flow-Noise)            0.08          0.08        0.08       0.08          0.08             0.04          0.04        0.04       0.04          0.04
+Entropy bonus (Flow-Noise)       0.005        0.005      0.005     0.005        0.005           0.005        0.005      0.005     0.005        0.005
+
+
+
+
+                                                                                                          23
+
+===== PAGE 24 =====
+
+                                              πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                     Table 13.Hyperparameters across MetaWorld and CALVIN benchmarks.
+
+                                                                                                                                        Benchmarks and models
+Parameters                                                                                            MetaWorld                                                                   CALVIN
+                                                                                      π0                         π0.5                           π0                          π0.5
+Train epochs                                                           450                                    450                                    100                                     100
+Global batch size                                                  2048                                  2048                                  2048                                   2048
+Update epochs                                                          4                                        4                                        4                                         4
+Actor lr                                                                  1e-5                                  5e-6                                  5e-6                                    5e-6
+Critic lr                                                                  1e-4                                  1e-4                                  1e-4                                    1e-4
+Scheduler                                                              False                                  True                                  False                                  False
+Reward discount rateγ                                        0.99                                   0.99                                   0.99                                    0.99
+GAEλ                                                                 0.95                                   0.95                                   0.95                                    0.95
+Clip ratioϵ                                                            0.2                                     0.2                                     0.2                                      0.2
+Interaction steps                                                     100                                    100                                    480                                     480
+Parallel environments                                             64                                      64                                      64                                       64
+Rollout epochs                                                         8                                        8                                        8                                         8
+Action prediction horizonH                                5                                        5                                        5                                         5
+Action replan horizonH                         ′                                        5                                        5                                        5                                         5
+Denoise steps                                                           5                                        5                                        5                                         5
+Noise levelσ(Flow-SDE)                                      0.5                                     0.5                                     0.5                                      0.5
+Max log-var (Flow-Noise)                                    0.10                                   0.10                                   0.16                                    0.16
+Min log-var (Flow-Noise)                                     0.04                                   0.04                                   0.08                                    0.08
+Entropy bonus (Flow-Noise)                                0.005                                 0.005                                 0.005                                  0.005
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                  24

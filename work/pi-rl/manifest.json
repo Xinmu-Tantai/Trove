@@ -1,0 +1,12 @@
+{
+  "article_id": "pi-rl",
+  "paper_title": "πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models",
+  "source_pdf": "sources/πRL - Online RL Fine-tuning for Flow-based Vision-Language-Action Models.pdf",
+  "sha256": "484e9f8be118be4f7adfd18470abc330e29b1b4cf457d316dc85a63e65299d36",
+  "page_count": 24,
+  "text_output": "work/pi-rl/paper.txt",
+  "rendered_pages": [
+    1
+  ],
+  "prepared_at": "2026-09-25T09:55:30.982574+00:00"
+}

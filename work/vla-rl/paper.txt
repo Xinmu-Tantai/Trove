@@ -1,0 +1,895 @@
+
+
+===== PAGE 1 =====
+
+   VLA-RL: Towards Masterful and General Robotic
+ Manipulation with Scalable Reinforcement Learning
+
+
+
+
+         Guanxing Lu1, Wenkai Guo2, Chubin Zhang1, Yuheng Zhou2, Haonan Jiang1
+                             Zifeng Gao1, Yansong Tang1:, Ziwei Wang2
+              1 Tsinghua Shenzhen International Graduate School, Tsinghua University
+       2 School of Electrical and Electronic Engineering, Nanyang Technological University
+                                github.com/GuanxingLu/vlarl
+
+
+                                                 Abstract
+
+          Recent high-capacity vision-language-action (VLA) models have demonstrated
+          impressive performance on a range of robotic manipulation tasks by imitating
+          human demonstrations.  However, exploiting offline data with limited visited
+          states will cause execution failure in out-of-distribution scenarios.  Intuitively,
+          an exploration-based method that improves on online collected data at test time
+          couldaddressthis limitation. WepresentVLA-RL,an algorithmic andsystematic
+          frameworkthatleveragesonlinereinforcementlearning(RL)toimprovepretrained
+          auto-regressive VLAs in downstream tasks.  Within a unified perspective, we
+          first introduce atrajectory-level RL formulation for auto-regressive VLA training,
+          whichmodelsgeneralroboticmanipulationtrajectoryasmulti-modalmulti-turn
+          conversation. To address thechallenge ofsparse rewards, we fine-tunea pretrained
+          vision-language model as a robotic process reward model, which is trained on
+          pseudo reward labels annotated on automatically extracted task segments.  To
+          scale up, we identify several implementation findings that improve the stability
+          andefficiencyincludingcurriculumselectionstrategy,GPU-balancedvectorized
+          environments,batchdecoding,andcriticwarmup. VLA-RLenablesOpenVLA-7B
+          to surpass the strongest finetuned baseline by 4.5% on 40 challenging robotic
+          manipulation tasks in LIBERO, and even matches the performance of advanced
+          commercialmodels suchasπ0-FAST. Notably,we observethatVLA-RLbenefits
+          fromincreasedtest-timeoptimization,indicatinganearlysparkofinferencescaling
+          laws in robotics.
+              “We want AI agents that can discover like we can, not which contain what we have discovered.”
+                                                                                         — The Bitter Lesson
+1   Introduction
+
+Largefoundationmodelspretrainedoninternet-scaledatasetshavedemonstratedeffectivenessacross
+avarietyofdomains, suchastext[56,13,17],image [79,74,81,80],video [87,73],and audio[14].
+Recently,largevision-language-action(VLA)models[9,8,68,39,44,35,36,19,6,7,57,32]have
+beenproposedbyimitatinglarge-scalehumandemonstrations[15,20,58,52,35,23,16,10,33,18,
+72, 6, 37], which indicates a possible pathway towards generalist robots that can perform diverse
+manipulationtasks. However, exploiting offlinedatawithlimitedvisitedstateswillcauseexecution
+failure in Out-of-Domain (OOD) scenarios at test time.
+Webelievethekeytoovercomingsuchchallengesliesintransformingexploitation-based approaches
+into exploration-based methods, as exemplified by Reinforcement Learning (RL) [63].  Recent
+breakthroughswitnessedinapplyingRLtolargelanguagemodels(LLMs)haveshownremarkable
+
+   :Corresponding author.
+
+
+Preprint. Under review.
+
+===== PAGE 2 =====
+
+Figure 1: Previous VLAsfocus on imitationlearning thatexploits theoffline demonstrations,whileVLA-RL ex-
+ploresimprovinghigh-capacityVLAswithscalablereinforcementlearning. Forevaluation,wetrainOpenVLA-
+7B to master40 challenging robotic manipulation tasks in LIBERO, and show a notable consistentimprovement
+over the imitation learning baseline.
+
+
+progress[17,82,47,31],wherethescalingbenefitsfromimitationpretrainingonofflinewebdataare
+approachingtheirlimits. Consequently,reinforcementlearninghasemergedasapromisingparadigm
+forachievingtest-timescalingimprovementsbytrainingononlinecollecteddatawithunlimitedstate
+coverage. It is natural to ask: can we achieve similar RL-based test-time scaling benefits in the field
+of robotic manipulation?
+On the other hand, many efforts have been proposed to apply RL to robotics [66].  However,
+traditional RL from scratch often suffers from data inefficiency and requires extensive reward
+engineering [2, 29, 85, 91]. Thus, previous works focus on simple domains, with low-dimensional
+state spaces [60, 24, 54] and small-scale network architecture (e.g. MLP)[60, 70, 1, 50, 51], single-
+task learning [92, 40].  In contrast, fine-tuning from large robotics foundation models with rich
+representational knowledge may significantly reduce the search space and enable the model to learn
+complex motion patterns, making training on general tasks and environments possible.
+Weexplorethisquestionthroughasystematicstudy. ToefficientlyimplementscalableRLtraining,we
+presentVLA-RL,aunifiedframeworkthatleveragesonlineRLtoimprovepretrainedauto-regressive
+VLAs. Specifically, within a unified perspective, we first introduce a general RL formulation for
+auto-regressive VLA training, which models general robotic manipulation trajectory as multi-modal
+multi-turnconversation. Toaddresschallengesassociatedwithsparserewardsintheexpansiverobot
+actionspace,weinstantiatea robotic process reward modelasvision-languagemodelfinetunedon
+automaticallyextractedpseudorewardlabels. BasedonVLA-RL,weidentifysystematicimplemen-
+tation improvements, including task selection, GPU-balanced environments, batch decoding, and
+criticwarmup—to enhancestabilityandefficiency. Empirically, weadoptOpenVLA-7B [39]as the
+baseVLAandapply ourmethodto40challengingrobotictasksin LIBERO[45]. Theresultsshow
+thatVLA-RLimproves thebase modelby alargemarginof4.5%and even matchestheperformance
+ofadvancedcommercialmodelssuchasπ0-FAST[57]. Furthermore,VLA-RL’sperformanceconsis-
+tentlyimproveswithincreasedtest-timecomputation,suggestingpreliminaryevidenceofinference
+scaling laws [64] in robotics.
+
+2   Related Work
+
+Robotic Foundation Models. Robotic foundation models demonstrating remarkable potential in
+developinggeneralizablerobotbehaviorsthroughmulti-tasktraining[9,8,68,39,44,35,36,19,6,7,
+57,32,48,46]onextensivemulti-taskandmulti-embodimentrobotdatasets[15,20,16,18,72,37].
+Notably,OpenVLA-7B[39]finetuneshigh-capacityvision-languagemodelstogeneraterobotactions
+aslanguagetokensinthemodelvocabulary,depictingimpressivegeneralizabilityacrossvarioustasks.
+However,theseVLAstrainedthroughimitationlearningfacesignificantdeploymentchallengeswhen
+dealing with OOD scenarios that are not covered in the offline expert demonstrations.
+ReinforcementLearningforRoboticsModels. Althoughreinforcementlearninghasdemonstrated
+numerous achievements in robotics [66], implementing RL methods from the ground up typically
+demandssophisticatedrewardandtrainingparadigmdesigns[2,29,85,91,28,89,22]. Consequently,
+researchershavethoroughly investigated theutilization ofpretrained modelsto enhanceRL perfor-
+mance [65,38,67,54,25,24,34,49,4,93,76,70,27,77]. However, priorstudies necessitate com-
+pleteofflinedatasetavailabilitythroughoutthefine-tuningprocess[54,1,25,24,34,71,40,49,60,5].
+
+
+                                                        2
+
+===== PAGE 3 =====
+
+Figure2: TheoverallpipelineofVLA-RL,whichiscomposedofatransformer-basedpolicy,ahomogeneous
+value model, a frozen robotic process reward model, and the vectorized environments.
+
+
+Furthermore, other proposed methodologies are exclusively tested in environments with simplified
+state representations [60, 24, 54], naive neural network structures [60, 70, 1, 50, 51], and narrow
+single-tasktrainingparadigms[92,40]. Incontrast,VLA-RLexploresfine-tuningfromlargerobotics
+foundationmodelswithtrajectory-levelRL,wheretherichrepresentationalknowledgesignificantly
+reducesthesearchspaceandenablesthemodeltolearncomplexmotionpatterns,makingtrainingon
+general tasks and environments possible.
+Reinforcement Learning for Large Models. Reinforcement learning has significantly enhanced
+LLMs’ reasoning capabilities through approaches that inspire our work [62, 17, 88, 43, 56, 11,
+75, 82, 47, 31, 3].  This family of methods begins with STaR [84] and includes reinforced self-
+training[21]andrejectionfine-tuning[83],relyingonsolutionsgeneratedbyLLMsforinteractive
+self-updating.  To facilitate more autonomous exploration and exploitation, policy optimization
+methodslikePPO[62]arewidelyusedincurrentpractice. Forexample,GRPO[17]strengthenssys-
+tematic problem-solving capabilities particularly relevant to sequential decision-making. Approaches
+enabling reasoning include Process Reward Models [88, 43] that evaluate intermediate reasoning,
+and conversation-based training methods [56, 11, 75] that optimize multi-turn interactions. Recent
+proposedRL techniques [82,47,31]demonstrate thatdifferentimplementation detailssignificantly
+improvethescalingofreasoninginlanguagemodels. Ourworkbridgestheseadvancestoroboticsby
+formulatingtrajectory-leveloptimizationasamulti-modal,multi-turnconversation,enablingrobots
+to benefit from similar RL frameworks that have proven effective for large language models.
+
+3   VLA-RL
+
+Inthis section,westart withbriefpreliminaries ontheproblem descriptionsandopen-sourced VLA
+models(Sec. 3.1). Wepresent anoverview ofour pipeline(Sec.3.2). Subsequently,we introducethe
+mathematicalformulationofgeneralroboticmanipulationasmulti-modalmulti-turnconversation
+(Sec. 3.3). Then we present       robotic process reward model for reward densification (Sec. 3.4). To
+implementinpractice, webuildandpresenttheVLA-RL system(Sec. 3.5)withseveralkey findings
+that facilitate scalable VLA training with RL.
+
+3.1   Preliminaries
+
+General robotic manipulation has been a core pursuit of the robotic community for a long time.
+The agent is required to interactively determine the next robot action (the end-effector’s pose) to
+performdiversetasks,basedonthevisualobservationandthehumaninstructionthatspecifiesthe
+current task. Recently, high-capacity, pretrained vision-and-language models have demonstrated
+generalizability across a wide range of language-conditioned manipulation tasks.  Among these,
+OpenVLA-7B[39]isaleadingopen-sourceVLA,whichhenceactsasthebasemodelofourmethod.
+At its core lies an auto-regressive LLM Llama-2-7B [69] with a two-stream visual encoder that
+
+
+                                                         3
+
+===== PAGE 4 =====
+
+   Algorithm 1:VLA-RL
+   Input: number of environmentsN, initial VLA policy with parametersθ0, trained
+            robotic process reward model with parametersϕ, post-processing functionf, steps per
+            updateM, discount factorγ, GAE parameterλGAE
+   Output: Improved VLA policyθK
+ 1 envsÐ VecEnvpnum_envs“Nq
+ 2 o0Ð envs.reset()
+ 3 d0Ðt0uN     # Terminal state indicators
+ 4 fork“ 0 toK´1 do
+ 5     BkÐH
+ 6       # Rollout Phase: Collect trajectories fromN parallel environments
+ 7       fort“ 0 toM´1 do
+ 8          vintÐhpotq     # Apply vision-text processor to all observations
+ 9          voutt Ðπθkpot,vintq     # Policy model generates
+10          atÐfpvouttq     # Extract actions
+11             # Compute action log probabilities as sum of token log probs
+12            logπθkpat|ot,vintqÐřilogπθkpvoutt,i|ot,vintq
+
+13          VtÐVθkpot,vintq     # Value model estimates
+14          ot`1,rsparset     ,dt`1,itÐ envs.steppatq
+15          rrprmt ÐRϕpot,atq     # Robotic process reward model
+16          rtÐrsparset  `rrprmt
+17         BkÐBkYtpot,at,rt,dt,voutt  ,logπθkpat|ot,vintq,Vtqu
+
+18      AGAEÐ GAEpBk,VM,γ,λGAEq # Compute advantages
+19      θk`1Ð PPOpθk,Bk,AGAEq     # Learning Phase: Update policy parameters
+
+20 returnθK
+
+
+   consists ofpretrained SigLIP[86] andDinoV2 [55] models. At each timestept, ittakes thecaptured
+   imageot byathird-personcameraandthehumaninstructionvint  asinputandoutputsanactiontoken
+   sequencevoutt PVn,where eachactiontoken represents adiscretebin ofonedimension oftherobot
+   action space. The final robot action is extracted from this sequence using a post-processing function
+   f, resultinginat“fpvouttq. However, optimizing theauto-regressiveVLA poseschallenges in both
+   algorithmicandsystematicaspects,includingRLforgeneralmanipulation,sparserewardissue,and
+   large-scale evaluation and optimization, etc.
+
+   3.2   Overall Pipeline
+
+   TheoverallpipelineofVLA-RLisshowninFig.2,inwhichwedevelopanalgorithmicandsystematic
+   framework totrainauto-regressiveVLAs with RL. The systemconsistsof threemodels,including
+   the policy and value model that need to be trained in the commonly used actor-critic framework, and
+   afrozenrobotic process reward modelthatdensifiesthesparserewardgivenbytheenvironment. At
+   thealgorithmiclevel,weformulateauto-regressiveVLA-RLtrainingasamulti-modalandmulti-turn
+   conversation.  The systematic techniques such as GPU-balanced vectorized environment, batch
+   decoding,curriculumselectionstrategy,andcriticwarmupfurthercontributetothetrainingefficiency
+   andstabilityofthesystem. Finally,thepost-trainedVLAmodelisabletoproducefeasibleactionsby
+   optimizing the expected reward, thereby performing diverse manipulation tasks successfully.
+
+   3.3   General Robotic Manipulation as Multi-turn Conversation
+
+   To extend RL to optimize auto-regressive VLAs for general manipulation, we first formulate the
+   Markovian Decision Process as multi-turn conversation. LetV represent the discrete, finite set of
+   vocabularytokens. ThespacesVm andVn denotethepossibleinputandoutputtextsequences,with
+   m andn specifying the maximum sequence lengths for inputsand outputs, respectively. We define
+   the state space as the Cartesian productS“OˆVm, whereO is the image space. The actionspace
+   is given by the set of all possible output utterances,Vn, generated by VLAs. Accordingly, the VLA
+   policy parameterized byθ can be formalized as a mappingπθ :OˆVmÑVn. At each timestep,
+
+
+                                                            4
+
+===== PAGE 5 =====
+
+the policy assigns a probabilityπθpvoutt |ot,vintqPr0,1s to emitting the outputsequencevoutt   given
+the input image ot and promptvint .  The environment’s transitions are governed by the function
+T :SˆAÞÑS, describing how states evolve after each action. The environmental reward function,
+R :SÑR,quantifiesthequalityofoutcomesasrt followingeachactiontaken. Overatrajectory
+ofT timesteps, the objective is to maximize the discounted sum of rewards,Rγ“řt“ 0Tγtrt,
+whereγ isthediscountfactor. WeemployProximalPolicyOptimization(PPO)[62]forstablepolicy
+optimization.
+Rollout Phase. We first merge the updated LoRA [26] weights with the original checkpoint and
+broadcast it to the inference engine. Then the agent interacts with the environment according to its
+current policyπθold, generating a sequence of states, actions, and rewards (i.e., trajectories). The
+log-probability of an action sequence can be decomposed into the summation of token-level log
+probabilities in auto-regressive models:
+                                                         |A|ÿ
+                                logπθpat|ot,vintq“           logπθpvoutt,i|ot,vintq                                       (1)
+                                                         i“1
+where|A|“ 7 is the degrees of freedom of the action space of OpenVLA.
+Learning Phase. The PPO objective function utilizes importance sampling with clipping to ensure
+stable updates:        „      ˆ  πθpat|ot,vintq               ˆ  πθpat|ot,vintq                    ˙     ˙ȷ
+
+       Lppopθq“Et        min     πθoldpat|ot,vintqAt,clip       πθoldpat|ot,vintq,1´ϵ,1`ϵ             At         (2)
+
+whereϵ isthe clippingparameter thatrestrictsthe ratiobetweenthe new andold policies,preventing
+excessive policy updates. For each state, the advantageAt is computed via Generalized Advantage
+Estimation (GAE) [61]. The overall process is summarized inAlg. 1.
+
+3.4   Robotic Process Reward Model
+
+Reward modeling is the crux of applying RL to general manipulation,  which needs to:  (1)
+provide dense rewards in environments with naturally sparse feedback; (2) avoid reward hack-
+ing where agents exploit the reward function in unintended ways.   To this end, we propose
+robotic process reward model, a novel approach for reward densification that aligns with the VLA’s
+token generation process.
+Reward Modeling as Next-tokenPrediction. Traditional reinforcement learning in robotics often
+suffers from sparse rewards, typically binary signals provided only upon task completion.  We
+reformulate reward modeling as a next-token prediction problem, leveraging the auto-regressive
+natureofpretrainedvision-languagemodels. Givenatrajectoryofstatesandactions,RoboticProcess
+RewardModel(RPRM)predictsthelikelihoodofsuccessfulactionsequences. Thetrainingobjective
+istomaximizethe log-likelihoodofpromisingactiontokens, weightedbyapseudo-rewardsignal
+that indicates progress towards task completion:«ÿ                                    ff
+
+                            Lrprmpϕq“´Et              logpϕpvrprmt,j|voutt,ăj,ot,vintq                           (3)
+                                                  j“1
+whereϕ are theparameters of therobotic process reward model model,pϕpvrprmj |¨q is thepredicted
+probability of the next tokenvrprmj     by robotic process reward model.
+Autonomous Pseudo Reward Label Generation. To train the robotic process reward model effec-
+tivelywithoutextensivehumanlabeling,wedevelopanautonomouslabelgenerationpipelinethat
+creates high-quality pseudo-reward labelsfrom successful trajectories: (1) Milestone Segmentation:
+Wecollectadatasetofdiversesuccessfultrajectoriesfromexpertdemonstrationsandpreviousmodel
+runs. Wesegmenttrajectoriesintosubtasksbasedonsignificantchangesingripperopenness,asthese
+often signify the completion of a functional step. (2) Progress Labeling: Within each segmented
+subtask,weidentifykeyframeswheretherobot’send-effectorvelocityapproacheszero. Thesepoints
+oftencorrespondtostablestatesorthecompletionoffine-grainedmotions. Apositivepseudo-reward
+is assigned to the VLA action sequences leading to these keyframes.
+The final reward is the direct summation of the golden sparse reward and the predicted reward
+from robotic process reward model. Our empirical analysis shows that this approach substantially
+accelerates learning while maintaining strong correlation with actual task success.
+
+
+                                                         5
+
+===== PAGE 6 =====
+
+3.5   TheVLA-RL System
+
+AsRLperformancehighlydependsontheimplementationdetails,wewouldliketosharesometricks
+we have adopted in this project to increase the learning efficiency and stability.
+CurriculumSelectionStrategy. Weimplementanadaptivecurriculumthatselectstasksbasedon
+the agent’s current capabilities. For each task consists of an instruction and an initial state, we track
+success ratessj and compute sampling probabilities as:
+                                       Pptaskjq9exppp0.5´sjq{τq                                                  (4)
+whereτ controlsexploration. Thisequationprioritizestasks with„ 50% successrate asthefrontier
+of the agent’s capabilities, while maintaining exposure to both mastered and challenging tasks,
+improving sample efficiency and generalization.
+CriticWarmup. Whentraining thevaluemodel (critic)fromscratch, itinitially producesinaccurate
+value estimates, which can mislead the model during the early stage of training. To address this
+issue,we implementacritic warmupphasewhere wecollectinitial trajectoriesusingthe imitation
+pretrainedpolicyandtrainthevaluenetworkexclusivelyforseveraliterationsbeforejointpolicy-value
+optimization begins.
+GPU-balanced Vectorized Environments We implement multiple vectorized environments for
+parallelrollout,whereeachtrainingGPUholdsasubsetofenvironments. Modernrenderersoften
+relyonGPUsforacceleration,butasthenumberofvectorizedenvironmentsincreases,GPUmemory
+consumption can grow significantly. To address this, we assign each GPU worker its own set of
+environmentstointeractwithandlearnfrom. Atthesametime,weusean‘all_reduce‘operationto
+gather the environmental states across all workers for the inference engine.
+Infrastructure. ThePPOinfrastructureusesbfloat16tofitmodelsintomemory. GivenGGPUsin
+total, we allocate a dedicated1 GPU to do inference with vLLM [41] acceleration and otherG´1
+GPUsforlearningbyRay[53],likedoneinOpenRLHF[30]andopen-instruct[42]. Inourcodebase,
+wehaveimplementedOpenVLA[39]inthevLLMpluginstoavoidusingtheoriginalHuggingface
+transformersgenerationfunction,whichleadstowrongresultswhendealingwithlargebatchsize.
+The distributed training process is managed by PyTorch Fully Sharded Data Parallel (FSDP) [90] to
+support large-scale training.
+
+4   Experiments
+
+In our experiments, we focus on the following questions:
+
+      1.How does   VLA-RL perform in commonly-used robotic manipulation benchmarks?
+      2.Does   VLA-RL scale with test time computing in general robotic manipulation?
+      3. Why doesVLA-RL show higher robustness than behaviorcloning in terms of the state and
+          action coverage of the training data?
+      4.  How do the proposed techniques and implementation details impact VLA-RL’s perfor-
+          mance?
+
+Inthefollowingsections,wedescribethesekeytopicsindetailwithcarefullycontrolledexperiments.
+
+4.1   Major Experiments
+
+ExperimentalSetup. ThissectionexploresadaptingVLA-RLtosimulated robotsetupsandtasks,
+specifically utilizing the LIBERO benchmark [45]. The LIBERO benchmark [45] encompasses
+fourchallengingtasksuites: LIBERO-Spatial,LIBERO-Object,LIBERO-Goal,andLIBERO-Long
+(or LIBERO-10), focusing on various spatial relationships, object categories, goal objectives, and
+extended sequential challenges. In our experiments, we focus on conducting RL starting from a
+base modelOpenVLA-7B [39] trainedwith supervised fine-tuning(SFT) for eachtask suite. In the
+test phase, all counterparts are evaluated across 500 episodes for each suite.Fig. 3shows several
+successful samples of the benchmark.
+Baselines. ForRLtraining,weusethereleasedcheckpointsfrom[39]asthebaseSFTmodel. Besides
+theSFTbaseline,wereporttheperformanceofDiffusionPolicy[12]trainedfromscratch,fine-tuned
+
+
+                                                        6
+
+===== PAGE 7 =====
+
+Figure 3: Environments and Tasks. For simulation, we evaluate on a commonly-used robotic manipulation
+benchmark named LIBERO with four task suites that focus on different challenges.
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 4: Test-time Scaling Curve. We evaluate the fine-tuned OpenVLA-7B every2500 training steps on the
+complete suite and report the average task success rates.
+
+
+diffusion-based VLA Octo [68], and GRAPE [89] trained with Direct Preference Optimization
+(DPO) [59] for better reference. In terms of metrics, we report the average success rates (SR) and the
+average ranking following [39].
+Performance Comparisons. We present the LIBERO experimental results inTab. 1after the      RL
+training process. VLA-RL improves the OpenVLA-7B checkpoint with SFT and DPO by sizable
+margins of4.5% and1.8% respectively, which demonstrates the effectiveness of the online RL and
+theproposedVLA-RLframework. Notably,afteronly48GPUhoursofRLtraining,the fine-tuned
+OpenVLA-7Bmatchestheperformanceofanadvancedcommercialmodelπ0-FASTtrainedwith
+high-qualitySFTdata,whiletheincreasingtrendsarestillconsistent. Theresultsimplytheunlimited
+potential of boosting high-capacity VLAs with large-scale RL.
+Test-timeScaling. WereportthetestsuccessratesalongtheRLtrainingprocessoffourLIBERO
+tasksinFig.4. Theevaluationsuccessratesonallfourtasksuitesareconsistentlyimprovedwiththe
+test time optimization, indicatingan early spark of inference scaling laws [64] in robotics     .
+
+4.2   Training Dynamics.
+
+Reinforcement learning on large models requires careful monitoring of key metrics to identify
+discrepancies and refine the system [82]. Following the common practice [82, 42], we report and
+analyze the learning dynamics to share some key findings regarding training VLAs with RL. The
+results are shown inFig. 5.
+Length of Generated Episodes We observe that successful VLA-RL training leads to gradually
+decreasingepisodelengths,indicatingthemodellearnsmoreefficientactionsequencesformanipula-
+tion tasks. This contrasts with LLM-based RL where longer sequences often correlate with improved
+reasoning capability.
+Dynamics of Reward During Training.  Reward trends show consistent improvement across
+training, with periodic plateaus corresponding to curriculum transitions between task difficul-
+ties. The reward improvements correlate strongly with physical task success rates, suggesting our
+robotic process reward model effectively captures meaningful progress in manipulation capabilities.
+
+
+                                                          7
+
+===== PAGE 8 =====
+
+                                Table 1: LIBERO simulation benchmark results. We presentaveragesuccess ratesand ranks basedon 500
+                                evaluation episodes for each method across LIBERO’s four task suites.  Methods are ranked 1 „ 5 within
+                                each suite, with 1 indicating best performance and 5 indicating worst. We also add an advanced commercial
+                                auto-regressive modelπ0-FAST[57] for reference.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                Figure 5: Training Dynamics. We draw the length of generated episodes, reward dynamics and rollout entropy
+                                along the training process on LIBERO-Long.
+
+                                RolloutEntropyofthePolicy. Appropriateactionentropyiscrucial: toolowrestrictsexploration,
+                                whiletoohighresultsinunstableimprovements. Ourimplementationmaintainsmoderateentropy
+                                levels that gradually decrease as training progresses while allowing initial exploration.
+                                TimingAnalysis. Thetimecostdistributionforvariouscomponentsofoursystemisillustratedin
+                                the right subfigure ofFig. 5. With the implementation of GPU-balanced vectorized environments
+                                and vLLM acceleration, the time spent on environmental evolution and model rollout has been
+                                significantly reduced. As a result, the primary focus now shifts tothe training phase, which indicates
+                                thatfurtherimprovementsintrainingefficiencycouldleadtosubstantialgainsinoverallperformance.
+
+                                4.3   Ablation Study
+
+                                We further conduct additional ablation experiments on LIBERO-Spatial task suite to more thor-
+                                oughlyvalidatetheproposeddesignchoicesinVLA-RL,encompassingboththetechnicalaspects
+                                and implementation details.   The results of these comparative studies are presented inTab. 2.
+                                Table2: AblationStudy. Weshowthefinalav-               Choice  of  Reward  Densification.    The  proposed
+                                erage successrates on LIBERO-Spatial. Elim-            robotic process reward modelenhancesthesuccessrate
+                                inating any individual stabilizing technique           from 85.8% to 90.2% compared to the sparse reward
+                                from VLA-RL leads to rapid collapse, high-             baseline, which demonstrates the significance of reward
+                                lighting the critical importance of each tech-         densification.   robotic process reward model provides
+                                nique introduced inVLA-RL.                             more frequent and informative signals that guide the
+                                  Hyperparameter                  LIBERO-Spatial       agenttowardsuccessfultaskcompletion,especiallyin
+                                                                                       long-horizon tasks where sparse rewards can lead to
+                                  VLA-RL                                90.2           inefficient exploration.
+                                  Remove Robotics PRM                   85.8
+                                  Remove Curriculum                     88.0           ChoiceofCurriculumSelectionStrategy. Curriculum-
+                                  Temperature“ 1.5Ñ1.0                  85.8           based task selection outperforms uniform random se-
+                                  Critic Warmup Steps“ 5Ñ0              80.0
+                                  LR“ 2e´5Ñ2e´4                         0.2            lection, improving success rate from 88.0% to 90.2%.
+                                                                                       By gradually increasing taskcomplexitybased onagent
+                                performance, thepolicy learns moreeffectively on simplertasks before tacklingdifficult ones. This
+                                reduces catastrophic forgetting and enables better generalization across the task distribution.
+                                ChoiceofSamplingTemperature. Lowertemperatureshamperexploration,causingconvergenceto
+                                suboptimal policies. To verify this, lowering temperature from1.5 to1.0 decreases success rate from
+                                90.2% to85.8%, indicating reduced randomness harms policy evaluation and optimization.
+                                Choice of CriticWarmup. Warming upthe value model before policy updates improves SR from
+                                80.0% to90.2%. This pre-training provides more accurate feedback for policy gradients, whereas
+                                without warmup, initially noisy value estimates negatively impact policy learning.
+
+
+                                                                                             8
+                       LIBERO-Spatial       LIBERO-Object        LIBERO-Goal        LIBERO-Long             Average
+                       SR(Ò)   Rank(Ó)     SR(Ò)   Rank(Ó)     SR(Ò)   Rank(Ó)     SR(Ò)   Rank(Ó)     SR(Ò)   Rank(Ó)
+DiffusionPolicy[12]    78.3%        5      92.5%        1      68.3%        5      50.5%        5      72.4%       4.0
+Octo(SFT)[68]          78.9%        4      85.7%        5      84.6%        1      51.1%        4      75.1%       3.5
+OpenVLA(SFT)[39]       84.7%        3      88.4%        4      79.2%        4      53.7%        3      76.5%       3.5
+GRAPE(DPO)[89]         87.6%        2      91.2%        3      82.2%        2      55.8%        2      79.2%       2.3
+π0-FAST[57]            96.4%-              96.8%-              88.6%-              60.2%-              85.5%-
+VLA-RL(Ours)           90.2%        1      91.8%        2      82.2%        2      59.8%        1      81.0%      1.5
+
+===== PAGE 9 =====
+
+ChoiceofLearningRate. Alowlearningrate(2e´5)reachesimpressiveperformance. Higherrates
+(2e´4)causeinstability,aligningwiththeobservationsin[28]. However,lowlearningratesalsoslow
+down convergence, which indicates the importance of implementation details in RL systems.
+The ablationstudy highlights theimportance ofeach component inVLA-RL, withthe full method
+achievingthe highest performance at90.2% success rate. Removing any single component leads to a
+noticeableperformancedrop,demonstratingthatallproposedtechniquescontributesynergisticallyto
+the overall effectiveness of our approach.
+
+
+4.4   RL vs. SFT
+
+ActionCoverageAnalysis. Wevisualizethe projectedXYplane ofthecollectedactions inFig.6.
+                                                             In LIBERO-Spatial, the robot arm is required
+                                                             tonavigatetopreciselyreachadesignatedcon-
+                                                             tact point. Analysis of the action distributions
+                                                             reveals a distinct contrast between offline and
+                                                             online data collection.  Expert actions tend to
+                                                             cluster near the center of the action space, re-
+                                                             flecting a preference for positions and often ex-
+                                                             hibiting repeated motion patterns. In contrast,
+Figure 6: Action Coverages of SFT and RL methods.            actions generated by RL agents are distributed
+We visualize the first two dimensions of the collected       more uniformly across the entire action space,
+actions(relativeend-effectorposes)onLIBERO-Spatial.          which enables RL policies to adapt to a wider
+                                                             variety of states. As aresult, the policy trained
+on RL-collected data exhibits stronger robustness than the SFT model trained on offline data.
+CaseStudy. Toexplorethescenarioswherereinforcementlearningshowcasesespecialeffectiveness,
+                                                             we analyze the rollout trajectories of both RL
+                                                             and SFT models in LIBERO-Goal. As shown
+                                                             inFig. 7,theagent isinstructedto "pickupthe
+                                                             black bowl on the wooden cabinet and place
+                                                             itontheplate",whichrequires fine-grainedin-
+                                                             teraction. The model fine-tuned withVLA-RL
+                                                             grasps the bottle successfully, while the SFT
+                                                             baseline fails by trying to grasp at a deviated
+                                                             point.  We conclude that policies trained with
+                                                             RL-collecteddataconsistentlyhelpwithalign-
+                                                             mentissuesincontact-richtasksandreducepre-
+Figure 7: Case Study. We show the robot trajectories         maturegripperclosureduringgrasping,aligning
+generated by the starting SFT baseline andVLA-RL.            with the observations in [78].
+
+
+5   Conclusions and Limitations
+
+Conclusions.  We present VLA-RL, a scalable reinforcement learning framework that enhances
+pretrained VLAs through online policy optimization. By formulating general robotic manipulation
+as multi-modal multi-turn conversations, our approach enables VLA models to explore beyond
+the limitations of offline demonstration data.  Our unified robotic process reward model using
+fine-tunedvision-languagemodelseffectivelyaddressessparserewardchallengesincomplextasks.
+Through several systematic design choices, we achieve substantial performance gains, surpassing
+a strong imitationlearning baseline OpenVLA-7B by4.5% on LIBERO benchmarks. Importantly,
+ourobservationthatperformancescaleswithtest-timeoptimizationsuggestsanemergingprinciple
+analogous to inference scaling laws in language models.
+Limitations.  Whilepromising,ourapproachfacesseveralchallenges. Forinstance,theproposed
+heuristics forextracting pseudo reward labelsmay not fully capturethe nuances ofmore dexterous
+manipulation tasks, potentially leading to inefficient policy optimization.  Future work includes
+trainingdiffusion-basedpolicies[7,68]withreinforcementlearningbeyondauto-regressiveVLAs,
+and exploring online self-improvement with large-scale real-world experience.
+
+
+                                                         9
+
+===== PAGE 10 =====
+
+References
+ [1]  Agarwal, R., Schwarzer, M., Castro, P.S., Courville, A.C., Bellemare, M.:  Reincarnating
+      reinforcement learning:  Reusing prior computation to accelerate progress. Proceedings of
+      Advances in Neural Information Processing Systems (NeurIPS)35, 28955–28971 (2022)2,3
+ [2]  Akkaya, I., Andrychowicz, M., Chociej, M., Litwin, M., McGrew, B., Petron, A., Paino, A.,
+      Plappert,M.,Powell,G.,Ribas,R.,etal.: Solvingrubik’scubewitharobothand.arXivpreprint
+      arXiv:1910.07113 (2019)2
+ [3]  Bai,S.,Li,M.,Liu,Y.,Tang,J.,Zhang,H.,Sun,L.,Chu,X.,Tang,Y.: Univg-r1: Reasoning
+      guideduniversalvisualgroundingwithreinforcementlearning.arXivpreprintarXiv:2505.14231
+      (2025)3
+ [4]  Baker,B.,Akkaya,I.,Zhokov,P.,Huizinga,J.,Tang,J.,Ecoffet,A.,Houghton,B.,Sampedro,
+      R., Clune, J.: Video pretraining (vpt): Learning to act by watching unlabeled online videos.
+      Proceedings of Advances in Neural Information Processing Systems (NeurIPS) 35, 24639–
+      24654 (2022)2
+ [5]  Ball, P.J., Smith, L., Kostrikov, I., Levine, S.: Efficient online reinforcement learning with
+      offline data. In: Proceedings of International Conference on Machine Learning (ICML). pp.
+      1577–1594. PMLR (2023)2
+ [6]  Bharadhwaj, H., Vakil, J., Sharma, M., Gupta, A., Tulsiani, S., Kumar, V.: Roboagent: General-
+      izationandefficiencyinrobotmanipulationviasemanticaugmentationsandactionchunking.
+      arXiv preprint arXiv:2309.01918 (2023)1,2
+ [7]  Black,K.,Brown,N.,Driess,D.,Esmail,A.,Equi,M.,Finn,C.,Fusai,N.,Groom,L.,Hausman,
+      K., Ichter, B., et al.:zpi_0: A vision-language-action flow model for general robot control.
+      arXiv preprint arXiv:2410.24164 (2024)1,2,9
+ [8]  Brohan, A.,Brown, N., Carbajal, J., Chebotar, Y.,Chen, X., Choromanski,K., Ding, T., Driess,
+      D.,Dubey,A.,Finn,C.,etal.: Rt-2: Vision-language-actionmodelstransferwebknowledgeto
+      robotic control. arXiv preprint arXiv:2307.15818 (2023)1,2
+ [9]  Brohan, A., Brown, N., Carbajal, J., Chebotar, Y., Dabis, J., Finn, C., Gopalakrishnan, K.,
+      Hausman,K.,Herzog,A.,Hsu,J.,etal.: Rt-1: Roboticstransformerforreal-worldcontrolat
+      scale. arXiv preprint arXiv:2212.06817 (2022)1,2
+[10] Cabi, S., Colmenarejo, S.G., Novikov, A., Konyushkova, K., Reed, S., Jeong, R., Zolna, K.,
+      Aytar,Y.,Budden,D.,Vecerik,M.,Sushkov,O.,Barker,D.,Scholz,J.,Denil,M.,deFreitas,N.,
+      Wang, Z.: Scaling data-driven robotics with reward sketching and batch reinforcement learning.
+      Robotics: Science and Systems (RSS) (2019)1
+[11] Chen, L., Lu, K., Rajeswaran, A., Lee, K., Grover, A., Laskin, M., Abbeel, P., Srinivas, A.,
+      Mordatch, I.: Decision transformer: Reinforcement learning via sequence modeling. arXiv
+      preprint arXiv:2106.01345 (2021)3
+[12] Chi, C., Feng, S., Du, Y., Xu, Z., Cousineau, E., Burchfiel, B., Song, S.: Diffusion policy:
+      Visuomotor policy learning via action diffusion. In: Robotics: Science and Systems (RSS)
+      (2023)6,8
+[13] Christiano,P.,Leike,J.,Brown,T.B., Martic,M., Legg,S., Amodei,D.: Deepreinforcement
+      learning from human preferences (2023),https://arxiv.org/abs/1706.03741 1
+[14] Chu, Y., Xu, J., Zhou, X., Yang, Q., Zhang, S., Yan, Z., Zhou, C., Zhou, J.: Qwen-audio:
+      Advancing universal audio understanding via unified large-scale audio-language models. arXiv
+      preprint arXiv:2311.07919 (2023)1
+[15] Collaboration, O.X.E.: Open X-Embodiment: Robotic learning datasets and RT-X models.
+      https://arxiv.org/abs/2310.08864 (2023)1,2
+[16] Dasari, S., Ebert, F., Tian, S., Nair, S., Bucher, B., Schmeckpeper, K., Singh, S., Levine, S.,
+      Finn,C.: Robonet: Large-scale multi-robotlearning.ConferenceonRobotLearning(CoRL)
+      (2019)1,2
+
+
+                                                        10
+
+===== PAGE 11 =====
+
+[17] DeepSeek-AI, et al.: Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement
+      learning (2025),https://arxiv.org/abs/2501.12948 1,2,3
+
+[18] Ebert, F., Yang, Y., Schmeckpeper, K., Bucher, B., Georgakis, G., Daniilidis, K., Finn, C.,
+      Levine,S.: Bridgedata: Boostinggeneralizationofroboticskillswithcross-domaindatasets.
+      arXiv preprint arXiv:2109.13396 (2021)1,2
+[19] Ehsani, K., Gupta, T., Hendrix, R., Salvador, J., Weihs, L., Zeng, K.H., Singh, K.P., Kim, Y.,
+      Han,W.,Herrasti,A.,etal.: Imitatingshortestpathsinsimulationenableseffectivenavigation
+      and manipulation in the real world. arXiv preprint arXiv:2312.02976 (2023)1,2
+[20] Fang, H.S., Fang, H., Tang, Z., Liu, J., Wang, C., Wang, J., Zhu, H., Lu, C.:  Rh20t:  A
+      comprehensive robotic dataset for learning diverse skills in one-shot. Towards Generalist
+      Robots: Learning Paradigms for Scalable Skill Acquisition@ CoRL20233, 5 (2023)1,2
+
+[21] Gulcehre,C., Paine,T.L., Srinivasan, S.,Konyushkova, K.,Weerts,L., Sharma,A., Siddhant,
+      A.,Ahern,A., Wang,M., Gu,C.,etal.: Reinforcedself-training(rest) forlanguagemodeling.
+      arXiv preprint arXiv:2308.08998 (2023)3
+
+[22] Guo,Y.,Zhang,J.,Chen,X.,Ji,X.,Wang,Y.J.,Hu,Y.,Chen,J.: Improvingvision-language-
+      action model with online reinforcement learning. arXiv preprint arXiv:2501.16664 (2025)
+      2
+[23] Gupta, A., Murali, A., Gandhi, D.P., Pinto, L.: Robot learning in homes: Improving general-
+      izationand reducingdataset bias.Proceedings ofAdvances inNeural InformationProcessing
+      Systems (NeurIPS)31 (2018)1
+[24] Gupta, A., Kumar, V., Lynch, C., Levine, S., Hausman, K.: Relay policy learning: Solving
+      long-horizon tasks via imitation and reinforcement learning. Conference on Robot Learning
+      (CoRL) (2019)2,3
+[25] Hester, T., Vecerik, M., Pietquin, O., Lanctot, M., Schaul, T., Piot, B., Horgan, D., Quan, J.,
+      Sendonaris, A., Osband, I., et al.: Deep q-learning from demonstrations. In: Proceedings of
+      AAAI Conference on Artificial Intelligence (AAAI) (2018)2
+
+[26] Hu, E.J., Shen, Y.,Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., Chen, W., et al.: Lora:
+      Low-rank adaptation of large language models. Proceedings of International Conference on
+      Learning Representations (ICLR)1(2), 3 (2022)5
+[27] Hu, H., Mirchandani, S., Sadigh, D.: Imitation bootstrapped reinforcement learning. arXiv
+      preprint arXiv:2311.02198 (2023)2
+[28] Hu,J.,Hendrix,R.,Farhadi,A.,Kembhavi,A.,Martin-Martin,R.,Stone,P.,Zeng,K.H.,Ehsan,
+      K.: Flare: Achieving masterful and adaptive robot policies with large-scale reinforcement
+      learning fine-tuning. arXiv preprint arXiv:2409.16578 (2024)2,9
+
+[29] Hu,J.,Stone,P.,Martín-Martín,R.: Causalpolicygradientforwhole-bodymobilemanipulation.
+      arXiv preprint arXiv:2305.04866 (2023)2
+
+[30] Hu,J.,Wu,X.,Zhu,Z.,Wang,W.,Zhang,D.,Cao,Y.,etal.: Openrlhf: Aneasy-to-use,scalable
+      and high-performance rlhf framework. arXiv preprint arXiv:2405.11143 (2024)6
+[31] Hu, J., Zhang, Y., Han, Q., Jiang, D., Zhang, X., Shum, H.Y.: Open-reasoner-zero: An open
+      source approach to scaling up reinforcement learning on the base model (2025), https:
+      //arxiv.org/abs/2503.24290 2,3
+[32] Intelligence,P.,Black,K.,Brown,N.,Darpinian,J.,Dhabalia,K.,Driess,D.,Esmail,A.,Equi,
+      M., Finn, C., Fusai, N., et al.:zpi_t0.5u: a vision-language-action model with open-world
+      generalization. arXiv preprint arXiv:2504.16054 (2025)1,2
+
+[33] Jang, E., Irpan, A., Khansari, M., Kappler, D., Ebert, F., Lynch, C., Levine, S., Finn, C.: Bc-z:
+      Zero-shottaskgeneralizationwithroboticimitationlearning.In: ConferenceonRobotLearning
+      (CoRL). pp. 991–1002. PMLR (2022)1
+
+
+                                                        11
+
+===== PAGE 12 =====
+
+[34] Julian, R., Swanson, B., Sukhatme, G.S., Levine, S., Finn, C., Hausman, K.:  Never stop
+      learning: The effectiveness of fine-tuning in robotic reinforcement learning. arXiv preprint
+      arXiv:2004.10190 (2020)2
+[35] Kalashnikov, D., Irpan, A., Pastor, P., Ibarz, J., Herzog, A., Jang, E., Quillen, D., Holly, E.,
+      Kalakrishnan, M., Vanhoucke, V., et al.: QT-Opt: Scalable deep reinforcement learning for
+      vision-based robotic manipulation. arXiv preprint arXiv:1806.10293 (2018)1,2
+[36] Kalashnkov,D.,Varley,J.,Chebotar,Y.,Swanson,B.,Jonschkowski,R.,Finn,C.,Levine,S.,
+      Hausman, K.: Mt-opt: Continuous multi-task robotic reinforcement learning at scale. arXiv
+      (2021)1,2
+[37] Khazatsky, A., Pertsch, K., Nair, S.,Balakrishna, A., Dasari, S., Karamcheti,S., Nasiriany,S.,
+      Srirama,M.K.,Chen,L.Y.,Ellis,K.,etal.: Droid: Alarge-scalein-the-wildrobotmanipulation
+      dataset. arXiv preprint arXiv:2403.12945 (2024)1,2
+[38] Khetarpal, K., Riemer, M., Rish, I., Precup, D.: Towards continual reinforcement learning: A
+      review and perspectives. Journal of Artificial Intelligence Research75, 1401–1476 (2022)2
+[39] Kim, M.J., Pertsch, K., Karamcheti, S., Xiao, T., Balakrishna, A., Nair, S., Rafailov, R., Foster,
+      E., Lam, G., Sanketi, P., et al.: Openvla: An open-source vision-language-action model. arXiv
+      preprint arXiv:2406.09246 (2024)1,2,3,6,7,8
+[40] Kober,J.,Mohler,B.,Peters,J.: Imitationandreinforcementlearningformotorprimitiveswith
+      perceptual coupling. In: From motor learning to interaction learning in robots, pp. 209–225.
+      Springer (2010)2,3
+[41] Kwon, W., Li, Z.,Zhuang, S., Sheng,Y., Zheng,L., Yu, C.H., Gonzalez, J.,Zhang, H., Stoica,
+      I.: Efficient memory management for large language model serving with pagedattention. In:
+      Proceedings of the 29th Symposium on Operating Systems Principles. pp. 611–626 (2023)6
+[42] Lambert, N., Morrison, J., Pyatkin, V., Huang, S., Ivison, H., Brahman, F., Miranda, L.J.V., Liu,
+      A.,Dziri,N.,Lyu,S.,etal.: Tz"ulu3: Pushingfrontiersinopenlanguagemodelpost-training.
+      arXiv preprint arXiv:2411.15124 (2024)6,7
+[43] Lightman, H., Kosaraju, V., Burda, Y., Edwards, H., Baker, B., Lee, T., Leike, J., Schulman, J.,
+      Sutskever, I., Cobbe, K.: Let’s verify step by step. arXiv preprint arXiv:2305.20050 (2023)3
+[44] Lin, F., Hu, Y., Sheng, P., Wen, C., You, J., Gao, Y.: Data scaling laws in imitation learning for
+      robotic manipulation (2024),https://arxiv.org/abs/2410.18647 1,2
+[45] Liu,B.,Zhu,Y.,Gao,C.,Feng,Y.,Liu,Q.,Zhu,Y.,Stone,P.: Libero: Benchmarkingknowledge
+      transfer for lifelong robot learning. Proceedings of Advances in Neural Information Processing
+      Systems (NeurIPS)36 (2024)2,6
+[46] Liu,J.,Dai,W.,Wang,C.,Cheng,Y.,Tang,Y.,Tong,X.: Plan,postureandgo: Towardsopen-
+      vocabularytext-to-motiongeneration.In: ProceedingsofEuropeanConferenceonComputer
+      Vision (ECCV). pp. 445–463. Springer (2024)2
+[47] Liu, Z., Chen, C., Li, W., Qi, P., Tianyu Pang, C.D., Lee, W.S., Lin, M.: Understanding r1-zero-
+      liketraining: Acriticalperspective(2025),https://arxiv.org/abs/2503.20783 2,
+      3
+[48] Lu, G., Wang, Z., Liu, C., Lu, J., Tang, Y.: Thinkbot: Embodied instruction following with
+      thought chain reasoning. arXiv preprint arXiv:2312.07062 (2023)2
+[49] Lu,Y.,Hausman,K.,Chebotar,Y.,Yan,M., Jang, E.,Herzog,A.,Xiao, T.,Irpan,A.,Khansari,
+      M., Kalashnikov, D., et al.: Aw-opt: Learning roboticskills with imitation and reinforcement at
+      scale. arXiv preprint arXiv:2111.05424 (2021)2
+[50] Luo, J., Hu, Z., Xu, C., Tan, Y.L., Berg, J., Sharma, A., Schaal, S., Finn, C., Gupta, A.,
+      Levine, S.: Serl: Asoftware suite for sample-efficientrobotic reinforcement learning. In: IEEE
+      International Conference on Robotics and Automation (ICRA). pp. 16961–16969. IEEE (2024)
+      2,3
+
+
+                                                         12
+
+===== PAGE 13 =====
+
+[51] Luo, J., Xu,C., Wu, J., Levine, S.: Precise anddexterous robotic manipulation viahuman-in-
+      the-loop reinforcement learning. arXiv preprint arXiv:2410.21845 (2024)2,3
+[52] Mandlekar,A.,Zhu,Y.,Garg,A.,Booher,J.,Spero,M.,Tung,A., Gao,J.,Emmons,J.,Gupta,
+      A., Orbay, E., et al.: Roboturk: A crowdsourcing platform for robotic skill learning through
+      imitation. In: Conference on Robot Learning (CoRL). pp. 879–893. PMLR (2018)1
+[53] Moritz, P., Nishihara, R., Wang, S., Tumanov, A., Liaw, R., Liang, E., Elibol, M., Yang, Z.,
+      Paul, W., Jordan, M.I., et al.: Ray: A distributed framework for emergingtAIu applications.
+      In: 13th USENIX symposiumon operating systemsdesign and implementation(OSDI 18). pp.
+      561–577 (2018)6
+[54] Nair,A., Gupta, A.,Dalal, M., Levine, S.: Awac: Accelerating online reinforcementlearning
+      with offline datasets. arXiv preprint arXiv:2006.09359 (2020)2,3
+[55] Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec, M., Khalidov, V., Fernandez, P.,
+      Haziza, D., Massa, F., El-Nouby, A., et al.: Dinov2: Learning robust visual features without
+      supervision. arXiv preprint arXiv:2304.07193 (2023)4
+[56] Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.L., Mishkin, P., Zhang, C., Agarwal,
+      S.,Slama,K., Ray,A.,Schulman,J., Hilton,J.,Kelton, F.,Miller, L.,Simens,M.,Askell, A.,
+      Welinder,P.,Christiano,P.,Leike,J.,Lowe,R.: Traininglanguagemodelstofollowinstructions
+      with human feedback (2022),https://arxiv.org/abs/2203.02155 1,3
+[57] Pertsch, K., Stachowicz, K., Ichter, B., Driess, D., Nair, S., Vuong, Q., Mees, O., Finn, C.,
+      Levine,S.: Fast: Efficientactiontokenizationforvision-language-actionmodels.arXivpreprint
+      arXiv:2501.09747 (2025)1,2,8
+[58] Pinto, L., Gupta, A.: Supersizing self-supervision: Learning to grasp from 50k tries and 700
+      robot hours. In:  IEEE International Conference on Robotics and Automation (ICRA). pp.
+      3406–3413. IEEE (2016)1
+[59] Rafailov,R.,Sharma,A.,Mitchell,E.,Manning,C.D.,Ermon,S., Finn,C.: Directpreference
+      optimization: Your language model is secretly a reward model. Proceedings of Advances in
+      Neural Information Processing Systems (NeurIPS) (2023)7
+[60] Rajeswaran, A., Kumar, V., Gupta, A., Vezzani, G., Schulman, J., Todorov, E., Levine, S.:
+      Learningcomplexdexterousmanipulationwithdeepreinforcementlearninganddemonstrations.
+      arXiv preprint arXiv:1709.10087 (2017)2,3
+[61] Schulman, J., Moritz, P., Levine, S., Jordan, M., Abbeel, P.: High-dimensional continuous
+      control using generalized advantage estimation. arXiv preprint arXiv:1506.02438 (2015)5
+[62]Schulman, J., Wolski, F., Dhariwal, P., Radford, A., Klimov, O.: Proximal policy optimization
+      algorithms. arXiv preprint arXiv:1707.06347 (2017)3,5
+[63]Silver, D., Sutton, R.S.: Welcome to the era of experience. Google AI (2025)1
+[64] Snell, C., Lee, J., Xu, K., Kumar, A.: Scaling llm test-time compute optimally can be more
+      effective than scaling model parameters. arXiv preprint arXiv:2408.03314 (2024)2,7
+[65] Taiga,A.A.,Agarwal,R.,Farebrother,J.,Courville,A.,Bellemare,M.G.: Investigatingmulti-
+      taskpretrainingandgeneralizationinreinforcementlearning.In: ProceedingsofInternational
+      Conference on Learning Representations (ICLR) (2023)2
+[66] Tang, C.,Abbatematteo, B.,Hu, J.,Chandra, R.,Martín-Martín, R.,Stone,P.: Deep reinforce-
+      mentlearningforrobotics: Asurveyofreal-worldsuccesses.arXivpreprintarXiv:2408.03539
+      (2024)2
+[67] Taylor,M.E.,Stone,P.: Transferlearningforreinforcementlearningdomains: Asurvey.Journal
+      of Machine Learning Research (JMLR)10(7) (2009)2
+[68] Team, O.M., Ghosh, D., Walke, H., Pertsch, K., Black, K., Mees, O., Dasari, S., Hejna, J.,
+      Kreiman, T., Xu, C., et al.:  Octo:  An open-source generalist robot policy. arXiv preprint
+      arXiv:2405.12213 (2024)1,2,7,8,9
+
+
+                                                        13
+
+===== PAGE 14 =====
+
+[69] Touvron,H., Martin,L.,Stone,K., Albert,P.,Almahairi, A.,Babaei,Y., Bashlykov,N.,Batra,
+      S., Bhargava, P., Bhosale, S., et al.: Llama 2: Open foundation and fine-tuned chat models.
+      arXiv preprint arXiv:2307.09288 (2023)3
+
+[70] Uchendu, I., Xiao, T., Lu, Y., Zhu, B., Yan, M., Simon, J., Bennice, M., Fu, C., Ma, C., Jiao,
+      J., et al.: Jump-start reinforcement learning. In: Proceedings of International Conference on
+      Machine Learning (ICML). pp. 34556–34583. PMLR (2023)2,3
+
+[71] Vecerik, M., Hester, T., Scholz, J., Wang, F., Pietquin, O., Piot, B., Heess, N., Rothörl, T.,
+      Lampe, T., Riedmiller, M.: Leveraging demonstrations for deep reinforcement learning on
+      robotics problems with sparse rewards. arXiv preprint arXiv:1707.08817 (2017)2
+
+[72] Walke, H., Black, K., Lee, A., Kim, M.J., Du, M., Zheng, C., Zhao, T., Hansen-Estruch, P.,
+      Vuong, Q., He, A., Myers, V., Fang, K., Finn, C., Levine, S.: Bridgedata v2: A dataset for robot
+      learning at scale (2023)1,2
+
+[73] Wang, Y., Zhang, H., Tang,Y., Liu, Y., Feng, J., Dai,J., Jin, X.: Hierarchical memory for long
+      video qa. arXiv preprint arXiv:2407.00603 (2024)1
+
+[74] Wang, Y., Zhang, H., Tian, J., Tang, Y.: Ponder & press: Advancing visual gui agent towards
+      general computer control. arXiv preprint arXiv:2412.01268 (2024)1
+
+[75] Wang, Z., Wang, K., Wang, Q., Zhang, P., Li, L., Yang, Z., Yu, K., Nguyen, M.N., Liu,
+      L., Gottlieb, E., et al.:  Ragen:  Understanding self-evolution in llm agents via multi-turn
+      reinforcement learning. arXiv preprint arXiv:2504.20073 (2025)3
+
+[76] Wołczyk, M., Cupiał, B., Ostaszewski, M., Bortkiewicz, M., Zaj˛ac, M., Pascanu, R., Łukasz
+      Kuci´nski,Miło´s,P.: Fine-tuningreinforcementlearningmodelsissecretlyaforgettingmitigation
+      problem (2024),https://arxiv.org/abs/2402.02868 2
+
+[77] Xing,J.,Romero,A.,Bauersfeld,L.,Scaramuzza,D.: Bootstrappingreinforcementlearning
+      with imitation for vision-based agile flight. arXiv preprint arXiv:2403.12203 (2024)2
+
+[78] Xu,C.,Li,Q.,Luo,J.,Levine,S.: Rldg: Roboticgeneralistpolicydistillationviareinforcement
+      learning. arXiv preprint arXiv:2412.09858 (2024)9
+
+[79] Yang, A., Yang, B., Zhang, B., Hui, B., Zheng,B., Yu, B., Li,C., Liu, D., Huang, F., Wei, H.,
+      et al.: Qwen2. 5 technical report. arXiv preprint arXiv:2412.15115 (2024)1
+
+[80] Ye, X., Gan, Y., Ge, Y., Zhang, X.P., Tang, Y.: Atp-llava: Adaptive token pruning for large
+      vision language models. arXiv preprint arXiv:2412.00447 (2024)1
+
+[81] Ye, X., Gan, Y., Huang, X., Ge, Y., Tang, Y.: Voco-llama: Towards vision compression with
+      large language models. arXiv preprint arXiv:2406.12275 (2024)1
+
+[82] Yu, Q., Zhang, Z., Zhu, R., Yuan, Y., Zuo, X., Yue, Y., Fan, T., Liu, G., Liu, L., Liu, X., Lin, H.,
+      Lin, Z., Ma, B., Sheng, G., Tong, Y., Zhang, C., Zhang, M., Zhang, W., Zhu, H., Zhu, J., Chen,
+      J.,Chen, J.,Wang, C.,Yu, H.,Dai, W.,Song, Y.,Wei, X.,Zhou,H., Liu,J., Ma,W.Y.,Zhang,
+      Y.Q.,Yan,L.,Qiao,M.,Wu,Y.,Wang,M.: Dapo: Anopen-sourcellmreinforcementlearning
+      system at scale (2025),https://arxiv.org/abs/2503.14476 2,3,7
+
+[83] Yuan,Z.,Yuan,H.,Li,C.,Dong,G.,Lu,K.,Tan,C.,Zhou,C.,Zhou,J.: Scalingrelationshipon
+      learningmathematical reasoningwith large languagemodels. arXiv preprintarXiv:2308.01825
+      (2023)3
+
+[84] Zelikman, E., Wu, Y., Mu, J., Goodman, N.: Star: Bootstrapping reasoning with reasoning.
+      Proceedings of Advances in Neural Information Processing Systems (NeurIPS) 35, 15476–
+      15488 (2022)3
+
+[85] Zeng, K.H., Zhang, Z., Ehsani, K., Hendrix, R., Salvador, J., Herrasti, A., Girshick, R.,
+      Kembhavi,A.,Weihs,L.: Poliformer: Scalingon-policyrlwithtransformersresultsinmasterful
+      navigators. arXiv preprint arXiv:2406.20083 (2024)2
+
+
+                                                         14
+
+===== PAGE 15 =====
+
+[86] Zhai,X.,Mustafa,B.,Kolesnikov,A.,Beyer,L.: Sigmoidlossforlanguageimagepre-training.
+      In: Proceedings of International Conference on Computer Vision (ICCV). pp. 11975–11986
+      (2023)4
+[87] Zhang, H., Wang, Y., Tang, Y., Liu, Y., Feng,J., Dai, J., Jin, X.: Flash-vstream: Memory-based
+      real-time understanding for long video streams. arXiv preprint arXiv:2406.08085 (2024)1
+[88] Zhang, Z., Zheng, C., Wu, Y., Zhang, B., Lin, R., Yu, B., Liu, D., Zhou, J., Lin, J.:  The
+      lessons of developing process reward models in mathematical reasoning (2025), https:
+      //arxiv.org/abs/2501.07301 3
+[89] Zhang, Z.,Zheng, K., Chen, Z.,Jang, J., Li, Y., Han, S.,Wang, C., Ding, M.,Fox, D., Yao, H.:
+      Grape: Generalizingrobotpolicyviapreferencealignment.arXivpreprintarXiv:2411.19309
+      (2024)2,7,8
+[90] Zhao, Y., Gu, A., Varma, R., Luo, L., Huang, C.C., Xu, M., Wright, L., Shojanazeri, H., Ott,
+      M., Shleifer, S., et al.: Pytorch fsdp: experiences on scaling fully sharded dataparallel. arXiv
+      preprint arXiv:2304.11277 (2023)6
+[91] Zhu, H., Yu, J., Gupta, A., Shah, D., Hartikainen, K., Singh, A., Kumar, V., Levine, S.: The
+      ingredients of real-world robotic reinforcement learning. arXiv preprint arXiv:2004.12570
+      (2020)2
+[92] Zhu, Y., Wang, Z., Merel, J., Rusu, A., Erez, T., Cabi, S., Tunyasuvunakool, S., Kramár,
+      J., Hadsell, R., de Freitas, N., Heess, N.: Reinforcement and imitation learning for diverse
+      visuomotor skills. In: Robotics: Science and Systems (RSS) (2018)2,3
+[93] Zhu, Z., Lin, K., Jain, A.K., Zhou, J.: Transfer learning in deep reinforcement learning: A
+      survey. Transactions on Pattern Analysis and Machine Intelligence (TPAMI) (2023)2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                         15

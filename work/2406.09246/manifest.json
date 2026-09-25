@@ -1,0 +1,17 @@
+{
+  "article_id": "2406.09246",
+  "paper_title": "OpenVLA: An Open-Source Vision-Language-Action Model",
+  "source_pdf": "sources/OpenVLA - An Open-Source Vision-Language-Action Model.pdf",
+  "sha256": "353c37df34458f12f969b14dfd8b77175b727b9cddea7bb891759beddeefe1be",
+  "page_count": 37,
+  "text_output": "work/2406.09246/paper.txt",
+  "rendered_pages": [
+    1,
+    4,
+    7,
+    9,
+    10,
+    37
+  ],
+  "prepared_at": "2026-09-25T09:09:03.227392+00:00"
+}

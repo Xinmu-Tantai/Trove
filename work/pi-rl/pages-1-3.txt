@@ -1,0 +1,186 @@
+===== PAGE 1 =====
+
+   πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+
+
+                  Kang Chen2,6,∗       Zhihao Liu3,6,∗       Tonghe Zhang4,∗,♯       Zhen Guo5  Si Xu5  Hao Lin5
+                        Hongzhi Zang1  Xiang Li5  Bingwen Wei1  Jiakai Zhou1  Quanlu Zhang5
+                           Zhaofei Yu2  Guoliang Fan3  Tiejun Huang2  Yu Wang1†    Chao Yu1†
+
+                                   https://github.com/RLinf/RLinf             https://huggingface.co/RLinf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure1. πRL: AnonlineRLframeworkforflow-basedVLAs. Incorporatingtwosolutions,Flow-NoiseandFlow-SDE,πRL enhancesthe
+performanceandgeneralizationofSFT-alignedmodelsacrossextensiveIDbenchmarksandOODsettings. RefinedwithRL,few-shot
+SFTpoliciesachieveperformancecomparabletofulldatasetbaselines. Additionally,wefacilitateseamlesszero-shotsim-to-realtransfer
+by constructing a simulator with 3D Gaussian Splatting as the rendering engine to narrow the visual domain gap.
+
+                            Abstract                                            π0.5  ) remains challenging due to intractable ac-
+      Vision-Language-Action (VLA) models enable                                tion log-likelihoods raised from flow matching.
+      robotstounderstand andperformcomplex tasks                                WeaddressthischallengewithπRL,featuringtwo
+      from multimodal input.  Although recent work                              technical approaches: (1)Flow-Noisemodels the
+      explores using reinforcement learning (RL) to                             denoisingprocessas adiscrete-timeMDP witha
+      automate the laborious data collection process                            learnable noise network for exact log-likelihood
+      in scaling supervised fine-tuning (SFT), apply-                           computation. (2)Flow-SDEintegrates denoising
+      ingRLtolarge-scaleflow-basedVLAs(e.g.,      π0,                           withagent-environmentinteraction,formulating
+                                                                                atwo-layerMDPthatemploysODE-to-SDEcon-
+    1Tsinghua University  2Peking University  3Institute of Au-                 version for efficient RL exploration. We evaluate
+tomation, Chinese Academy of Sciences 4Carnegie Mellon Uni-                     πRL acrossvariousbenchmarks,withexperiments
+versity 5Infinigence AI 6Zhongguancun Academy ♯ Work done                       demonstrating that RL yields significant perfor-
+at  Tsinghua  University ∗  Equal  Contributions  .    Correspon-               manceimprovementsin bothin-distribution and
+dence  to:   Yu  Wang  <yu-wang@tsinghua.edu.cn>,  Chao  Yu                     out-of-distribution settings.
+<zoeyuchao@gmail.com>.
+
+Preprint. January 30, 2026.
+
+                                                                       1
+
+===== PAGE 2 =====
+
+                            πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+1. Introduction                                                           process (MDP) for exact log-likelihood estimation.Flow-
+Vision-Language-Action(VLA)models(Dinetal.,2025)                          SDEconverts the ordinarydifferential equation (ODE)de-
+have emerged as a leading solution for general-purpose                    noisingprocessintoastochasticdifferentialequation(SDE)
+robots,effectivelybridgingthegapbetweenhigh-levelmul-                     whilemaintainingequivalentmarginaldistributionsforex-
+timodal reasoning and low-level physical control (Firoozi                 ploration,and buildsatwo-layer MDPthatcouples thede-
+et al.,2025). Conditioned on sensor inputs and language                   noising process with policy-environment interaction. Given
+commands, VLAs (Team et al.,2024;Kim et al.,2024;                         theformulated MDPand theexact log-likelihoodcomputa-
+Black et al.,2024;Intelligence et al.,2025) can translate                 tion,πRL undergoes further optimization via the proximal
+abstractinstructionsintoexecutableroboticactions,thereby                  policy optimization (PPO) (Schulman et al.,2017).
+enabling intuitive and flexible human-robot interaction.                  Weconductextensiveexperimentsonvariousbenchmarks
+The training methodology for VLAs follows the standard                    to evaluate the effectiveness of πRL on π0 (Black et al.,
+pre-training and supervised fine-tuning (SFT) paradigm                    2024) and       π0.5   (Intelligence et al.,2025) models. Across
+as shown in Fig.1.   Building on the pretrained Vision-                   allbenchmarks,theproposedframeworkconsistentlyyields
+Language Model (VLM) (Touvron et al.,2023;Beyer et al.,                   substantialperformancegainsoverSFTbaselines. Further-
+2024),VLAsarefine-tunedonlarge-scale,heterogeneous                        more,outofdistributionevaluationsconfirmthatourmodel
+human demonstrationdatasets (O’Neill etal.,2024;Khaz-                     yields genuine policy enhancement rather than narrow over-
+atsky et al.,2024), followed by SFT on the target task to                 fitting on the target environment.
+align their capabilities with the specific embodiment and                 To sum up, our contributions are:
+environment. However,relianceonSFTintroducesacritical
+challenge: curating large-scale, high-quality expert trajecto-               •  RLforflow-basedVLAs.Weintroduce         πRL,anonline
+riesisbothlaboriousandcostly(Dinetal.,2025). Besides,                           RLfine-tuningframeworkwithFlow-NoiseandFlow-
+modelsobtainedviaSFTtendtooverfittoexpertdemonstra-                             SDE formulations for flow-based VLAs.
+tions (Fei et al.,2025), with their performance fundamen-                    •  Superior Performance.We demonstrate significant
+tally constrained by the quality of expert demonstrations.                      performanceimprovementsand enhancedgeneraliza-
+Recentefforts (Zangetal.,2025;Liet al.,2025a;Tanet al.,                         tion ofπ   RL across various benchmarks.
+2025;Liuetal.,2025a)haveexploredexpandingtheVLA
+training process with reinforcement learning (RL), estab-                    •  ComprehensiveAblation.Weconductthoroughabla-
+lishing a pre-training, SFT, and RL paradigm as shown in                        tionstudies, offeringempiricalinsights toguidefuture
+Fig.1,allowingVLAstoimprovetheirperformancebeyond                               RL research on flow-based VLAs.
+expert demonstrations through environmental interaction                      •  Open-sourceCodeand Models.Werelease allcodes
+and develop more generalizable policies.                                        to ensure reproducibility, hoping that our study helps
+However, these RL advances have been largely confined                           to advance further research in this field.
+to autoregressive VLAs, featuring OpenVLA (Kim et al.,
+2024)andOpenVLA-OFT(Kimetal.,2025),whichemploy                            2. Related Work
+discrete action decoders that generate output in an autore-
+gressive or parallel fashion. This stands in stark contrast               2.1. Vision-Language-Action Models
+to flow-based VLAs, exemplified by the π series models,                   VLA models have recently achieved remarkable progress in
+whichgenerateactionsthroughiterativerefinementinflow                      roboticsbyintegratingmultimodalinputstoenableunified
+matching(Lipmanet al.,2022),offeringtheadvantagesof                       perception, reasoning, and control. This development has
+generating action chunks in high-frequency and performing                 ledto aseries ofarchitectures,including Octo(Team etal.,
+highly dexterous tasks (Black et al.,2024). Consequently,                 2024),RT(Brohanetal.,2022),OpenVLA,OpenVLA-OFT,
+previous VLA-RL algorithms are incompatible with flow-                    π0,π 0.5  , and GR00T (Bjorck et al.,2025).
+based VLAs, and the fundamental challenge lies in how
+to characterize a logarithmic likelihood (Hutchinson,1989;                2.2. Online RL Fine-tuning for VLA Models
+Chen et al.,2018) for the executed actions.
+In this paper, we introduceπRL, a frameworkdesigned for                   Recent research has increasingly focused on enhancing the
+fine-tuningflow-basedVLAswithonlineRLalgorithms. To                       performance and generalization of VLAs with online RL.
+addresstheintractablelog-likelihoodestimationproblemin                    For example, SimpleVLA-RL (Li et al.,2025a), building
+flow matching, we propose two solutions.Flow-Noiseinte-                   on the OpenVLA-OFT and GRPO, demonstrated that RL
+gratesalearnablenoisenetworkintothedenoisingprocess                       can improve long-horizon planning of VLA models un-
+and models this stage as a discrete-time Markov decision                  derdatascarcity. RL4VLA(Liuetal.,2025a)empirically
+                                                                          evaluatedPPO,GRPO,anddirectpreferenceoptimization
+
+                                                                      2
+
+===== PAGE 3 =====
+
+                             πRL: Online RL Fine-tuning for Flow-based Vision-Language-Action Models
+
+(DPO) (Rafailov et al.,2023) with stage-based sparse re-                    robot proprioception to a sequence of H future actions
+wards.  RLinf-VLA (Yu et al.,2025;Zang et al.,2025)                         At = [a t,0  ,...,at,H−1      ], formulated as p(A   t|o t).  Within
+providesa unifiedandefficientframework forscalableRL                        the model, the VLM extracts features from the visual and
+training of VLA models.  These works demonstrate the                        language inputs, while the flow matching expert is tasked
+effectiveness of RL fine-tuning VLA models.                                 with generating the actions. Specifically, the model learns a
+                                                                            conditionalvectorfieldvθ thattransformsa standardGaus-
+2.3. RL Fine-tuning for Flow Models                                         sian noise distribution into the target action At.  This is
+Integrating RL with flow models is a promising way to                       achieved by minimizing the Conditional Flow Matching
+transcendthelimitationsofimitationlearning. Tothisend,                      (CFM)loss,whichalignsthepredictedvectorfieldvθ with
+Flow-GRPO (Liu etal.,2025b)converts thedeterministic                        the ground-truth vector fieldu:
+
+ODEintoanequivalentSDEtoenablestochasticityexplo-                                                               h                                   i
+ration,afoundationuponwhichsubsequentworkslikeMix-                          LCFM =E   τ,p(A    t,o t),q(A     τt|A t)∥v  θ(A τt,o t)−u(A         τt|A t)∥ 22.
+GRPO (Li et al.,2025b) and TempFlow-GRPO (He et al.,                                                                                            (3)
+2025) further accelerate training through hybrid ODE-SDE                    Here, the conditional probability pathq(A   τt|A t) generates
+rollouts.  ReinFlow (Zhang et al.,2025) injects learnable                   a noisy action1Aτt =τA     t+(1−τ)ϵ           from an actionAt,
+noise into the flow path and transforms it into a discrete-                 randomnoiseϵ∼N(0,I)          ,andacontinuoustimeτ∈[0,1]
+time Markov process with a tractablelikelihoodfor stable                    in flow matching. For this specific path, the corresponding
+policy gradient updates. Flow policy optimization (FPO)                     ground-truthvectorfieldisdefinedasu(A    τt|A t)=A   t−ϵ   .
+(McAllister et al.,2025) reframes policy optimization as                    During the inference, the action sequence is generated by
+maximizing theadvantage-weightedratio ofthe conditional                     firstsamplinganoisevectorA0t ∼N(0,I)        ,whichisfurther
+flow matching loss.                                                         iterativelyrefinedbyintegratingthelearnedvectorfieldvθ
+3. Preliminary                                                              over a fixed number of steps based on the forward Euler
+                                                                            method:A             τ+δt     =A   τt +v   θ(A τt,o t)·δ.
+3.1. Problem Formulation
+We formulate the task as an MDP, defined by a tuple                         4. Methodology
+M= (S,A,P              0,PENV,RENV,γ)  . The state st ∈ S is de-            Existing VLA-RL approaches leverage base models such
+finedastherobotobservationot andP0 denotestheinitial                        as OpenVLA for discrete actions and OpenVLA-OFT for
+statedistribution. Giventhestate,theflowpolicypredicts                      continuous actions. To compute the action log-likelihood
+anactiona          t∼π(·|s         t)∈A,resultinginthestatetransition       logπ     θ(a t|s t), discretemodels (Liuet al.,2025a)apply soft-
+st+1 ∼P    ENV(·|s    t,at) and a rewardRENV(s t,at). The ob-               maxtotheoutputlogits, whilecontinuousmodels(Lietal.,
+jectiveistolearn apolicyπθ thatmaximizesthe expected                        2025a) treat the action as a Gaussian distribution, employ-
+γ-discounted return over a horizon ofT+1:                                   ing a prediction head to estimate the variance. As for the
+                                " TX                     #                  flow-basedVLAs,directlycomputingtheexactlikelihood
+           J(π    θ)=E   πθ,P0        γtRENV(s t,at)       .         (1)    (Hutchinson,1989)isinaccuratewithfewdenoisingsteps.
+                                  t=0                                       Moreover, the deterministic nature of its ODE sampling
+                                                                            process precludesexploration,making its implementation
+With the policy gradient surrogate (Williams,1992), the                     within RL non-trivial. To this end, we proposeFlow-Noise
+gradientofthereturnexpectationcanbeapproximatedfrom                         and Flow-SDE, two technical approaches that make flow-
+sampled trajectories:                                                       based VLAs amenable to RL.
+                           " TX                                  #
+  ∇θJ(π    θ)=E   πθ,P0           ∇θlogπ     θ(a t|s t)A(s      t,at).      4.1. Flow-Noise
+
+                             t=0                                            InspiredbyReinflow(Zhangetal.,2025),weincorporatea
+                                                                   (2)      learnable noise network into the flow matching denoising
+The advantage function, A(s    t,at) =Q(s        t,at)−V(s         t),      processandsolvetheproblemwithinthestandardone-layer
+measures the relative merit of the action value Q(s     t,at)               MDP framework detailed in Sec.3.1.  By modeling the
+overthestatevalueV(s    t),providingalow-variancesignal                     denoising stage as a discrete MDP, we can directly com-
+for the policy update.                                                      putethelog-likelihoodofthedenoisedsequence,enabling
+3.2. Flow-based Vision-Language-Action Model                                equivalent policy optimization via RL.
+
+                                                                                1Aτt incorporatestwotemporalindices,tdenotesthediscrete
+A flow-based VLA modelπθ is designed to map the obser-                      time step for environment interaction andτ represents the continu-
+vationot comprising RGB images, language tokens, and                        ous time variable in flow matching.
+
+                                                                         3
+

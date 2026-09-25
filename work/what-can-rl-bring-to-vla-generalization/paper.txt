@@ -1,0 +1,1414 @@
+
+
+===== PAGE 1 =====
+
+         What Can RL Bring to VLA Generalization?
+                                    An Empirical Study
+
+
+
+                                   Jijia Liu1∗   Feng Gao2∗    Bingwen Wei1
+                   Xinlei Chen1     Qingmin Liao1     Yi Wu2     Chao Yu1†    Yu Wang3†
+                      1Shenzhen International Graduate School, Tsinghua University
+                2Institute for Interdisciplinary Information Sciences, Tsinghua University
+                       3Department of Electronic Engineering, Tsinghua University
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 1: Overview of our study for evaluating how RL enhances VLA generalization in terms of
+Vision,Semantics,andExecution: inout-of-distributiontests,RLyieldssubstantialgainsinExecution,
+moderate improvements inSemantics, and performance on par with SFT forVision.
+
+                                                   Abstract
+
+          Large Vision-Language Action (VLA) models have shown significant potential
+          for embodied AI. However, their predominant training via supervised fine-tuning
+          (SFT) limits generalization due to susceptibility to compounding errors under
+          distribution shifts. Reinforcement learning(RL) offers a pathto overcomethese
+          limitations by optimizing for task objectives via trial-and-error, yet a systematic
+          understanding of its specific generalization benefits for VLAs compared to SFT
+          is lacking.  To address this, our study introduces a comprehensive benchmark
+          for evaluating VLA generalization and systematically investigates the impact of
+
+   ∗Equal contribution. {liujj23,gaof22}@mails.tsinghua.edu.cn
+   †Corresponding authors: {yuchao, yu-wang}@mail.tsinghua.edu.cn
+
+
+39th Conference on Neural Information Processing Systems (NeurIPS 2025).
+
+===== PAGE 2 =====
+
+          RL fine-tuning across diverse visual, semantic, and execution dimensions. Our
+          extensive experiments reveal that RL fine-tuning, particularly with PPO, signifi-
+          cantlyenhancesgeneralizationinsemanticunderstandingandexecutionrobustness
+          overSFT, whilemaintainingcomparablevisualrobustness. WeidentifyPPOas a
+          moreeffectiveRLalgorithmforVLAsthanLLM-derivedmethodslikeDPOand
+          GRPO.WealsodevelopasimplerecipeforefficientPPOtrainingonVLAs,and
+          demonstrate its practical utility for improving VLA generalization. The project
+          page is athttps://rlvla.github.io.
+
+1   Introduction
+
+Vision-Language-Action(VLA)modelsrepresentanemergingclassoffoundationmodels(Maetal.,
+2024; Firooziet al., 2023) that unifyperception, language understanding, andembodied control. By
+leveraging vision-language models pretrained on internet-scale data and further training on large,
+heterogeneousrobotdemonstrationdatasets(Collaborationetal.,2023;Khazatskyetal.,2024),VLAs
+can interpret sensor observations and natural language instructions to directly map them to robot
+actions. This paradigm has demonstrated promising generalization across diverse tasks—including
+single-arm, bimanual, and mobile manipulation (Team et al., 2024; Kim et al., 2024; Liu et al., 2024;
+Wenetal.,2025),navigation(Shahetal.,2022),andevencomplexlong-horizonactivitieslikekitchen
+or bedroom cleaning in unseen scenarios (Black et al., 2024; Intelligence et al., 2025).
+Despite this promise, VLA model training predominantly relies on supervised fine-tuning (SFT)
+through behavioral cloning of demonstration labels (Kim et al., 2025). This approach, whether in
+pretrainingorfew-shotadaptation,isinherentlysusceptibletocompoundingerrorsunderdistribution
+shift: minordeviationsfromexperttrajectoriescanaccumulate,steeringthepolicyintounfamiliar
+statesand underminingrobust performance(Rossand Bagnell,2010; DeHaan etal., 2019;Belkhale
+etal.,2023;Fosteret al.,2024). Thismismatchbetweentrainingand testingdistributions fundamen-
+tally limits robustness, with research highlighting issues like quadratic regret growth relative to the
+task horizon under such conditions (Ross and Bagnell, 2010).
+Incontrast,reinforcementlearning(RL)offersaparadigmthatdirectlyoptimizescumulativetask
+rewards through trial-and-error, enabling policies to explore beyond narrow expert data and learn
+corrective behaviors. Crucially, in the broader foundation model landscape, particularly for Large
+LanguageModels(LLMs)andVision-LanguageModels(VLMs),recentstudieshaveunderscored
+RL’s advantages for generalization (Ouyang et al., 2022; Zhai et al., 2024; Huang et al., 2025).
+Compelling evidence suggests thatwhile SFT tends tomemorize training data, RL fine-tuningcan
+lead tosubstantially betterout-of-distribution performanceand unlockgreater reasoning capabilities
+(Chu et al., 2025; Huang et al., 2025; Ma et al., 2025). Drawing from RL’s established success in
+roboticsandtheseencouragingresultsfromotherlarge-scalemodels,RLfine-tuningisincreasingly
+being applied to VLAs (Collaboration et al., 2023; Walke et al., 2023; Khazatsky et al., 2024),
+with approaches ranging from incorporating human feedback (Chen et al., 2025) to using offline
+RL updates (Zhang et al., 2024b) or algorithms like PPO (Schulman et al., 2017), sometimes in
+multi-stage processes with imitation learning (Guo et al., 2025b).
+However, despitethese pioneeringefforts,a systematicunderstanding ofwhat specificgeneralization
+benefitsRL fine-tuningconfers uponVLAs, especiallyin directcomparisonto SFTbaselines, and
+how theirrespective strengthsdiffer, remainsinsufficientlydeveloped(Huet al.,2024;Mark etal.,
+2024). Forinstance,whilerecentworklikeFLaRe(Huetal.,2024)demonstratedPPO’sutilityfor
+fine-tuning VLAs, a comprehensive analysis of the resulting model’s generalization capabilities was
+not its primary focus.
+Thispaperaimstoaddressthiscriticalgap. Weundertakeasystematicstudytodissectthegeneral-
+ization properties of VLAs fine-tuned with RL versus SFT.
+
+          Specifically,weempiricallyinvestigate: WhatuniquebenefitscanRLbringtoVLA
+          generalization compared to supervised fine-tuning?
+To answer this, we center our investigations on the representativepick-and-placetask.  On this
+task, we first evaluate mainstream RL algorithms for large-scale models (PPO (Schulman et al.,
+2017; Ouyang et al., 2022), DPO (Rafailov et al., 2023; Zhang et al., 2024b), GRPO (Shao et al.,
+2024; Guo et al., 2025a)) to identify effective VLA fine-tuning strategies. We then conduct a broad
+
+
+                                                         2
+
+===== PAGE 3 =====
+
+comparative evaluation, also on pick-and-place, pinpointing where RL fine-tuning outperforms
+SFT. As previewed in Fig. 1, this comprehensive evaluation rigorously examines generalization
+across three key dimensions: 1)Vision: challenging generalization with novel backgrounds (unseen
+tables) and by overlaying unseen textures on the foreground or the entire image.  2)Semantics:
+testingunderstanding viaunseen objects,novel receptacles, and varied instructionphrasings toprobe
+language sensitivity and object recognition.  3)Execution: probing robustness by varying initial
+robotstates,object/receptaclepositions,andintroducingdynamicdisturbanceslikerandomobject
+reposition within episodes.
+Through extensive experiments and deep analyses, we:
+
+        •  Establish a rigorous and challenging benchmark to evaluate how VLA fine-tuning methods
+          affect generalization across diverse visual, semantic, and execution dimensions.
+        •  IdentifyPPOasthepreferredRLalgorithmforVLAfine-tuningoverGRPOandDPO,while
+          also discuss key challenges in adapting these RL algorithms from LLM/VLM paradigms to
+          the distinct requirements of VLAs.
+        •  Develop an efficient PPO-based VLA fine-tuning recipe, enabled by a shared actor-critic
+          backbone, VLA model warm-up, and minimal PPO training epochs.
+        •  DemonstrateRL’ssuperiorgeneralizationoverSFTinsemanticunderstandingandembodied
+          execution for VLAs, while maintaining comparable visual robustness.
+
+2   Related works
+2.1   Vision-Language-Action (VLA) models
+In robotic tasks that utilize both vision and language inputs, recent research demonstrates that
+leveraging knowledge from pre-trained LLMs or VLMs (Chen et al., 2023; Driess et al., 2023;
+Karamchetietal.,2024;Beyeretal.,2024)leadstobetterpolicygeneralizationcomparedtosmaller
+models(Zhaoetal.,2023;Chietal.,2023). Byharnessingthecapabilitiesofthesefoundationmodels
+and utilizing large-scale robotic datasets, VLA models (Brohan et al., 2023b,a; Team et al., 2024;
+Kimetal.,2024;Liuetal.,2024;Wuetal.,2023;Cheangetal.,2024;Blacketal.,2024;Intelligence
+et al., 2025) provide a strong basis for embodied agent. Our work builds upon VLA and seeks to
+further improve its generalization abilities.
+
+2.2   RL fine-tuning for large-scale (Vision-)Language Models
+Fine-tuning large language models has shown promising results (Stiennon et al., 2020; Ouyang et al.,
+2022; Achiam et al., 2023), especially when using high-quality supervised data (Zhang et al., 2024a;
+Zhu et al., 2023; Zhang et al., 2023b). Some work aims to align LLMs with human preferences
+for helpfulness and safety (Kaufmann et al., 2023; Bai et al., 2022), using online RL algorithms
+(Schulmanetal.,2017;Ramamurthyetal.,2023;Zhengetal.,2023)orofflineupdates(Rafailovetal.,
+2023; Ivisonet al.,2024; Xuet al.,2024). Other studieshaveshownthat onlineRL fine-tuningon
+mathandcodingtasks(Shaoetal.,2024;Guoetal.,2025a)cansignificantlyimprovethereasoning
+abilitiesofLLMs(Guoetal.,2025a;Jaechetal.,2024;Teametal.,2025). AlthoughRLhasbeen
+extensively explored inLLMs (Chu etal., 2025), itsgeneralization potentialfor similar-scale VLA
+models remains underexplored.
+
+2.3   Fine-tuning policies for robotic tasks
+VLA fine-tuning largely relies on supervised data (Kim et al., 2025; Liu et al., 2025; Zhao et al.,
+2025;Zhengetal.,2024). However,thescarcityofextensiveandhigh-qualitydataoftenhampersthe
+ability ofVLAs to generalizeto unseen scenariosor perturbations (Collaborationet al., 2023;Walke
+etal.,2023;Khazatskyetal.,2024). Tomovebeyondimitationandenablereward-drivenlearning,
+RLfine-tuning hasbeen exploredin various settings, fromsmall-scale models(Ren etal., 2024)to
+large models with human interventions (Chen et al., 2025), or through offline updates (Zhang et al.,
+2024b). Guoetal.(2025b) proposedusingPPO(Schulman etal.,2017)to fine-tuneVLAmodels,
+incorporating imitation learning in a two-stage process. Despite these efforts, the generalization
+ability of RL fine-tuning in VLA models remains insufficiently studied (Hu et al., 2024; Mark et al.,
+2024). Moreover,wefindthatVLAscanbedirectlyfine-tunedwithonlinePPOwithoutadditional
+training stages or imitation learning, underscoring RL’s scalability for robot tasks.
+
+
+                                                         3
+
+===== PAGE 4 =====
+
+3   Preliminaries
+
+3.1   Problem formulation
+
+We model each language-conditioned robotic taskT∈T    as a Partially Observable Markov Decision
+Process (POMDP), defined as a tupleM= (S,A,P,R,O,L,P(s                                 0),γ)   .  Here, the state space
+S includes robot and environment states,A is the action space of control commands, andO the
+observation space of sensor outputs. Transitions followst+1 ∼P(·|s     t,at), andγ is the discount
+factor. EachtaskT has naturallanguage instructionsLT ⊂L and arewardR(s,l)∈R           when states
+completestaskstagesorsatisfiesinstructionl. Episodesstartwithaninstructionl∼L T andinitial
+states0∼P(s        0), which defines the robot’s initial pose and environment. The policyπθ uses the last
+H observationsot−H+1:t            and the language instructionl to output actionsat∼π   θ(a t|o t−H+1:t         , l) ,
+constructing trajectoryτ= (o                     0,a0,...).
+
+Supervisedfine-tuning(SFT).SFTlearnsfromanexpert-collecteddemonstrationdatasetD                       T =
+{(τ    (i)  ,l(i)  )} Ni=1 , where each trajectory is τ(i)   = (o (i)0 ,a(i)0 ,...,o(i)Ki−1  ,a(i)Ki−1  ) and N is the total
+number of trajectories. The VLA policyπ  θ minimizes:
+                                            Ki−1X                     ,   ˆa   (i)
+             LSFT(θ) =       X                     ℓSFT ˆa  (i)t  , a(i)t    t   =π   θ o(i)t−H+1:t         , l(i) ,
+                             (τ  (i)  ,l(i)  )∈D Tt=0
+whereℓSFT isalossfunction(e.g.,next-tokenprediction,L1 regression,diffusion)basedonVLA
+architecture and action representation (Kim et al., 2025).
+
+RL fine-tuning.  RL fine-tuning maximizes scalar rewards or preference signals through direct
+interactionswithenvironments. Withrewards,itminimizesthenegativediscountedreturnoveran
+episode of lengthM:
+                                                              hM−1X               i
+                                      LRL(θ) =−E           τ∼π     θ γtR(s    t,l) ,
+                                                                t=0
+often via a policy-gradient surrogate:
+                                                   hM−1X
+                           LPG(θ) =−E          τ∼π    θ    Aπt logπ     θ at|o t−H+1:t         , li,
+                                                     t=0
+using an advantage estimatorAπt. With preferences, methods like Direct Preference Optimisation
+(DPO) (Rafailov et al., 2023) use pairwise/ranked feedback to optimizeπθ for preferred trajectories.
+
+3.2   Vision-Language-Action models
+
+We base our study on OpenVLA (Kim
+et  al.,  2024)  (Fig.  2),  an  open-source
+model that achieves state-of-the-art per-
+formance by pairing a fused visual en-
+coderof SigLIP (Zhaietal.,2023) andDI-
+NOv2 (Oquab et al., 2023) with a Llama-
+2 7B language backbone (Touvron et al.,
+2023),builtonthePrismaticVLM(Karam-
+chetietal.,2024). Ateachtimestepthepol-
+icyreceivesasingleRGBimageot andan                     Figure 2: Architecture of the OpenVLA model (Kim
+instructionl, i.e., thehistory lengthH= 1   .          et al., 2024), reproduced from the official open-source
+The image isembedded into visual tokens,               code and checkpoints.
+the instruction is tokenised with Llama 2’s
+tokenizer, and the resulting token sequence is fed to the causal transformer decoder.
+OpenVLAfollowstheRT-2discretisationrecipe(Brohanetal.,2023a): eachscalarinthecontinuous
+commandat∈R  da ismapped tooneof256binsthat uniformlysplittherange betweenits1st and
+99th percentiles in the training set, producing an action–token vector ut ∈{0,...,255}           da. These
+actiontokensoverwritethe 256least-usedtokensinthe Llama-2 vocabulary, sothelanguagemodel
+canemitthemdirectly. Thenetworkisthentrainedwiththeusualnext-tokencross-entropyobjective,
+and the cross-entropy loss is computed solely on the predicted action tokens.
+
+
+                                                            4
+
+===== PAGE 5 =====
+
+            (a) Overview of different fine-tuning methods                     (b) Performance comparison
+Figure 3: Overview of VLAfine-tuning methods: SFTlearns fromoffline demonstrations, whereas
+DPO, GRPO, and PPO use RL-based updates—employing preference alignment, group-relative
+advantage estimation, and standard actor-critic PPO with generalized advantage estimation (GAE),
+respectively; and performance comparison between different RL fine-tuning algorithms.
+
+4   Effective RL fine-tuning of VLA models
+Webeginourstudybyexploringhowtofine-tuneVLAmodelswithreinforcementlearning. Asthese
+models inherit a similar scale and structure from their pre-trained LLM/VLM backbones, we first
+test whether common RL algorithms for large-scale models like LLMs/VLMs transfer effectively to
+VLAs. InSec.4.1,wewillshowthatProximalPolicyOptimization(PPO)(Schulmanetal.,2017)
+consistentlyimprovesperformance,whereasDirectPreferenceOptimization(DPO)(Rafailovetal.,
+2023; Zhang et al., 2024b) and Group Relative Policy Optimization (GRPO) (Shao et al., 2024)
+struggle to learn something for POMDP robotic tasks. Guided by this finding, we then ablate key
+design choices within PPO to distill an effective fine-tuning recipe for VLA models in Sec. 4.2.
+
+4.1   RL algorithms: PPO, GRPO, DPO
+Here,weconsiderthreerepresentativeRLalgorithms: PPO(Schulmanetal.,2017),GRPO(Shao
+etal.,2024)andDPO(Rafailovetal.,2023;Zhangetal.,2024b). Allmodelsarefine-tunedusing
+Low-Rank Adaptation (LoRA) (Hu et al., 2022) with rank = 32.
+
+        •  PPOperformson-policyupdates,computingpolicygradientswithclippedimportanceratios
+          and Generalised Advantage Estimation (GAE) from freshly collected rollouts. Recent work
+          Open-Reasoner-Zero (ORZ) by (Hu et al., 2025) shows that disabling GAE (settingγ= 1
+          andλ= 1  )canboostperformancewhenfine-tuninglargemodels. Accordingly,weevaluate
+          both the standard algorithm (PPO) and this variant (PPO-ORZ) in our experiments.
+        •  GRPOestimatesthebaselineusingagroupofsamples,allowingfordirectcomputationof
+          advantageswithoutexplicitvalueestimation. Whilenaturallanguagegenerationandrobotic
+          multi-step MDP tasks are inherently different, we follow the GRPO setup (Shao et al.,
+          2024)by sampling trajectoriesfroma common initialstate,with eachgroupcontaining8
+          trajectories.
+        •  DPOexploitsofflinedatasetsannotatedwithpairwisepreferences. Inrobotictasks,however,
+          obtainingcontrastivetrajectoriesfromthesame initial stateisdifficult. Following(Zhang
+          et al., 2024b), we infer trajectory-level preferences from reward signals. To ensure a fair
+          comparison, we employ only the stage-based sparse reward described in Sec. 5.1, rather
+          thanthe richerreward schemeused inthe originalimplementation by(Zhang etal., 2024b).
+
+These algorithms are illustrated in Fig. 3a, with further details and implementation specifics provided
+in Sec. A.1. We evaluate the performance on thepick-and-placetask described in Sec. 5.1.
+TheresultsarepresentedinFig.3b,witheachexperimentconductedusingtwodifferentrandomseeds.
+Our findings indicate that PPO consistently outperforms GRPO. We attribute this to fundamental
+differences in environment dynamics between natural language tasks and robotic tasks (Li et al.,
+2024b). Wehypothesisthat,inrobotictasks’POMDP,eachactionsequentiallyalterstheenvironment
+stateinanon-stationarymanner,whichmaydestabilizesGRPO’sadvantageestimates. Additionally,
+PPO surpasses DPO performance. We hypothesize that this is due to the sparse reward structure,
+which makes it challenging to distinguish between the quality of different trajectories, as well as
+significantdistributionshiftsbetweenthe offlinedatasetandinteractiveexecution (Prudencioetal.,
+2023).
+
+
+                                                        5
+
+===== PAGE 6 =====
+
+ (a) Model architecture of actor-critic OpenVLA                                  (b) Performance comparison
+Figure4: PPOwithsharedactor-criticbackbone,whereV(s)      ispredictedbyathree-layerMLP.We
+compare the performance of different critic designs, as well as a separate actor-critic architecture.
+
+
+
+
+
+
+
+
+
+
+         (a) VLA warm-up                 (b) PPO epoch (wall-clock time)            (c) PPO epoch (env. steps)
+               Figure 5: Performance comparison to verify our efficient training designs.
+
+4.2   Design factors of PPO
+
+WeemployseveralkeydesignchoicestoenablePPOtoworkeffectivelywithOpenVLA.Withthese
+designs,our mainexperimentsrequireabout 42hoursona singleNVIDIAA100 GPUtoconverge.
+Inthefollowing,weintroducethesedesignchoicesandpresentablationstudiestoassesstheirimpact.
+We conduct each experiment with two different random seeds.
+
+Shared actor-critic backbone.SincePPO—and most modernRL methods—usean actor–critic
+formulation(KondaandTsitsiklis,1999),wetreatthepretrainedVLApolicyastheactorandattach
+a lightweightcriticthat estimatesthe state value                       V(s)     . To keep thearchitecture compact, the actor
+and critic share the entire Transformer backbone; a three-layer MLP value head (see Fig. 4a) takes
+the hidden vector h0 produced by the final Transformer block (Vaswani et al., 2017) at the first
+action-token position and regresses it to a scalar value. To verify its efficacy, we evaluated several
+criticdesigns. Feedingthevalueheadwiththefirstaction-tokenembeddingh0 producedthehighest
+and most stable returns, outperforming the last-token inputhn and the concatenation[h 0,...,hn]
+(see Fig. 4b). A critic that uses its own Transformer backbone achieved comparable rewards but
+trained35%slowerandconsumed83%moreVRAM(81.3      GBvs.44.4      GB).Theseresultsconfirm
+that a shared backbone withh        0 is the most efficient choice.
+
+VLA warm-up.   We run all experiments with the official OpenVLA checkpoint (Kim et al., 2024)
+pretrainedontheOXEdataset(Collaborationetal.,2023). Duetothepoorperformanceofthischeck-
+pointonourbenchmark,wewarmitupwith        140demonstrationtrajectoriesgatheredbyOcto-Small
+(Team et al., 2024) and a motion planner (see Sec. A.2). As shown in Fig. 5a, the warm-up model
+reaches convergence with roughly 50% fewer environment steps, while both initialisations attain
+comparableasymptoticreturnsgivensufficientinteraction. Unlessstatedotherwise,allsubsequent
+experiments use the warmed-up OpenVLA model for initialization.
+
+MinimalPPOepoch.Weshowthattheupdate–to–dataratioisakeyfactorforefficientfine-tuning.
+In PPO this ratio is set by theepochhyper-parameter, which specifies how many gradient passes
+each batch receives. Fig. 5b and Fig. 5c reveal that increasing the PPOepochbeyond one yields
+nogainsinreturn orsample efficiency,yetlengthens wall-clocktime almostlinearly. Accordingly,
+we fix epoch= 1          in all remaining experiments, achieving the fastest training without sacrificing
+performance.
+
+
+                                                         6
+
+===== PAGE 7 =====
+
+   (a) SFT@Training           (b) SFT@OOD Eval               (c) RL@Training                (d) RL@OOD Eval
+Figure 6: Effect of data scale on SFT performance. The reported metrics include grasp accuracy,
+continuous grasp accuracy, and task success rate.
+
+5   Evaluating fine-tuning methods on VLA generalization
+
+5.1   Environments and datasets
+
+TothoroughlyinvestigatethegeneralizationcapabilitiesofVLA,wefocusonatypicalpick-and-place
+task(Kimetal.,2025;Lietal.,2024a),wheretheagentisinstructedtoplaceanobjectfromthetable
+into a receptacle. Inspired by prior works (Fan et al., 2025; Stone et al., 2023) and the concept of
+Vision-Language-Action models, we define three dimensions of generalization:Vision,Semantics
+(Language), andExecution (Action), as illustrated in Fig. 1.
+        • Vision: We include both foreground (Dynamic Textures) and background (Unseen Table)
+          changes,as wellasimage-levelDynamicNoise, appliedwith eitherweakorstrongintensity.
+        • Semantics: We consider previously unseen variations inObjects,Receptacles, andInstruc-
+          tionPhrasings. Additionally, wedesignnewtasks whereoneoftwoobjects mustbepicked
+          (Multi-Object), using either seen or unseen object sets.  We also include a task with a
+          Distractive Receptacle, and a task requiring the object to be placed in one of two unseen
+          receptacles (Multi-Receptacle).
+        • Execution: Weinvestigatechangesintheinitialpositionsofboththeobjectandtherecepta-
+          cle,as wellastherobot initialpose. Furthermore,weintroducea new scenarioinwhichthe
+          object’s position changes during the task (Mid-Episode Object Reposition).
+To probe generalisation, we randomise each task along three axes during training:Vision(16 tables),
+Semantics(16 objects), andExecution(perturbations of object and receptacle poses). At test time
+we hold at least one of these factors out of distribution, introducing nine novel objects, sixteen
+unseen receptacles, five new table surroudings, and sixteen distractor textures. Assets are drawn
+from Objaverse (Deitke et al., 2023) and other public sources; additional table appearances are
+synthesised with Stable Diffusion (Rombach et al., 2022) and ControlNet (Zhang et al., 2023a),
+ensuringsurfacevariationwithoutchangingthetable’sglobalpose. Moredetailsofassetacquisition
+and task specification are provided in Secs. A.3 and A.4. Built upon these assets, our tasks run in
+ManiSkill (Tao et al., 2024) with an 8-DoF WidowX-250S arm. At every step the agent observes
+a 640×480          RGB frame and a natural-language instruction, and outputs a Cartesian end-effector
+deltaplusabinary grippersignal. Rewardsaresparse: 0.1    forgraspingand continuously holdingthe
+correctobject,and1.0   forplacingitsuccessfully. Forsupervisedfine-tuningwecollectdemonstration
+trajectoriesusingthe MPLibmotionplanner(Guoet al.,2024)andfine-tunedusing LoRA(Huetal.,
+2022); further dataset details can be found in Sec. A.2.
+
+5.2   Effect of data scale on SFT performance
+FollowingLinetal.(2025),westudyhowsupervisedfine-tuning(SFT)scaleswithdemonstration
+count. We train OpenVLA to convergence on datasets ranging from a few hundred to 64k expert
+trajectories(∼1.26      Mtransitions)andreportaveragescoresoverthreerandomseedsin-distribution
+and on unseen objects/tables (Fig. 6a and 6b). We observe that performance plateaus at roughly
+16k trajectories in both settings, so we adopt the 16k-trajectory SFT checkpoint as the baseline for
+comparing RL fine-tuning methods.
+
+5.3   Performance comparison between RL and SFT
+Building on preceding analyses, we plot success rates during RL training for both the training
+distribution and theOOD object/table splitin Fig. 6cand 6d, alongside SFTscores at various data
+
+
+                                                          7
+
+===== PAGE 8 =====
+
+                                                                                                     (b)
+
+
+
+
+
+
+
+
+
+
+
+                                           (a)                                                       (c)
+Figure 7: (a) Performance comparison between SFT and RL across different tasks. Both success rate
+and relative performance drop are reported. (b) Radar chart of success rate. (c) Radar chart of the
+performance ratio of out-of-distribution (OOD) to in-distribution (IND).
+scales. RL overtakes the strongest SFT checkpoint (SFT-16k) after roughly0.4    M environment steps
+onOODtask. Atconvergence,itperformscomparablytoSFT-16kinthetrainingsettingand42.6%
+betteronunseenobjectsandtables,showingthatreinforcementlearningnotonlyimprovespolicy
+performance under the training distribution but also provides markedly stronger generalization.
+We further evaluate the generalization performance of the converged RL policy and the best-
+performingSFTpolicy(SFT-16k,shortlydenotedasSFT)onOODtasks,asshowninFig.7. Herewe
+reportaveragesuccessratesandaverageperformancedropoverthreerandomseedswhilefulldetailed
+resultscanbefoundinSec.B.3. TherelativeperformancedropiscalculatedasP=     OOD−IND
+                                                                                                       IND    . The
+resultsindicatethatRLperformscomparablytoSFTinVisiontasks,noticeablybetterinSemantics,
+and significantly better inExecution.
+ForVision, wehypothesize that neither RL nor SFT traininginduces visual robustness beyondthe
+imposedvisualrandomness(i.e.,random trainingtables),resultinginsimilarperformanceforboth
+methods. InSemanticstasks, RL notably outperforms SFT when faced with OOD objects, both in
+single and multiple object scenarios. We hypothesize that, through trial-and-error, RL is able to
+learn the skill of “grasp” in a manner that is less dependent on object type, leading to improved
+generalization. ForExecutiontasks, RL surpasses SFT across all three evaluated scenarios: OOD
+object and receptacle positions, OOD robot initial positions, and mid-episode object repositioning.
+5.4   Dissecting RL’s contributions to generalization
+Toprobequalitativedifferencesbetweenthetwoap-
+proaches, we visualise policy roll-outs on four rep-
+resentative tasks (Fig. 9). InVision/Dynamic-Noise
+(strong), the SFT agent repeatedly drops the object
+immediately after grasping, indicating that heavy vi-
+sualperturbationspreventitfromlocalisingtherecep-
+tacle,whereastheRLagentcompletestheplacement.
+WithanUnseen ObjectinSemantics, SFT keeps at-                            (a) SFT                   (b) RL
+temptingtograsptheitemitalreadyholdsandstalls,
+while RL lifts it and finishes the task. This may be            Figure 8: Training trajectories of SFT (left)
+attributedtoRL’sextensivetrial-and-errorexperience              andRL(right);colorencodesgripperZ-axis
+duringtraining,enablingittomakefiner-grainedcon-                rotation.
+trol when interacting with unseen objects. RL also
+learnedtorecoverfromfailedgraspsandmid-episode
+objectshiftsintwoExecutiontests,whereasSFTmarchesoninspiteofpositionerrors,likelybecause
+suchcasesneverappearinthedemonstrationdata. Thetrajectorydistributionsencounteredduring
+
+
+                                                         8
+
+===== PAGE 9 =====
+
+                            Figure 9: Visualization of some concrete examples.
+
+
+training (Fig. 8) echo this gap: RL trajectories span a broader workspace and a richer range of
+end-effectororientations, whereasSFTroll-outs clusteralongthe motion-plannerpathspresent inthe
+dataset. This wider coverage appears key to RL’s superior generalisation onExecutiontasks.
+
+
+6   Conclusion
+
+This study puts forward a demanding benchmark that probes how RL fine-tuning shapes the out-of-
+distribution generalization of VLA models. After adapting several RL methods to VLAs, we find
+that a streamlined PPO variant—featuring a shared actor-critic backbone, a simple warm-up, and
+only minimal PPO epochs—yields the strongest and most efficient gains. Relative to supervised
+fine-tuning,thisRL approachsubstantiallyimprovessemanticgroundingand action execution under
+distributionshifts,whilematchingitsresiliencetovisualperturbations. Theseresultsunderscorethe
+promise of reinforcement learning as a route towards more generalizable embodied agents.
+
+
+Limitations.Despite its contributions, our study has several limitations. First, we rely solely on
+motion-planner–generateddemonstrationsfor supervisedfine-tuning,which maynotfully capture
+thevariabilitypresentinhuman-collecteddata. Second,ourevaluationisconfinedtopick-and-place
+tasks; scaling to a broader, more complex, multi-task setting remains an important direction for
+futurework. Third,all experimentsareconducted insimulation,so integratingRL fine-tuningwith
+sim-to-realtransfer tovalidateVLA generalization onphysical robotsisa crucialnextstep. Wehope
+our findings will inform and accelerate these future efforts.
+
+
+                                                          9
+
+===== PAGE 10 =====
+
+Acknowledgements
+
+This    research    was    supported    by    National    Natural    Science    Foundation    of    China
+(No.62325405,62406159), Tsinghua University Initiative Scientific Research Program, Tsinghua-
+EfortJointResearchCenterforEAIComputationandPerception,BeijingNationalResearchCenter
+for Information Science, Technology (BNRist), Beijing Innovation Center for Future Chips, State
+Key laboratory of Space Network and Communications, and Beijing Zhongguancun Academy
+Project C20250301.
+We would like to express our sincere gratitude to Liangzhi Shi, who carried out the deployment
+ontheFrankaPandaroboticarmandprovidedvaluablesim-to-realevaluationresults. Wearealso
+grateful to Hongzhi Zang for her insightful advice on GRPO performance tuning, which significantly
+improved the quality of this work.
+
+References
+Josh Achiam,StevenAdler,Sandhini Agarwal,Lama Ahmad, IlgeAkkaya, Florencia LeoniAleman,
+  DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,etal. Gpt-4technicalreport.
+  arXiv preprint arXiv:2303.08774, 2023.
+
+YuntaoBai,AndyJones,KamalNdousse,AmandaAskell,AnnaChen,NovaDasSarma,DawnDrain,
+  Stanislav Fort, Deep Ganguli, Tom Henighan, et al. Training a helpful and harmless assistant with
+  reinforcement learning from human feedback.arXiv preprint arXiv:2204.05862, 2022.
+
+Suneel Belkhale, Yuchen Cui, and Dorsa Sadigh. Data quality in imitation learning.Advances in
+  neural information processing systems, 36:80375–80395, 2023.
+Lucas Beyer, Andreas Steiner, André Susano Pinto, Alexander Kolesnikov, Xiao Wang, Daniel Salz,
+  Maxim Neumann, Ibrahim Alabdulmohsin, Michael Tschannen, Emanuele Bugliarello, Thomas
+  Unterthiner, Daniel Keysers, Skanda Koppula, Fangyu Liu, Adam Grycner, Alexey A. Gritsenko,
+  Neil Houlsby, Manoj Kumar, Keran Rong, Julian Eisenschlos, Rishabh Kabra, Matthias Bauer,
+  MatkoBosnjak,XiChen,MatthiasMinderer,PaulVoigtlaender,IoanaBica,IvanaBalazevic,Joan
+  Puigcerver, Pinelopi Papalampidi,Olivier J.Hénaff,Xi Xiong,Radu Soricut,JeremiahHarmsen,
+  and Xiaohua Zhai. Paligemma: A versatile 3b vlm for transfer.CoRR, abs/2407.07726, 2024.
+  URLhttps://doi.org/10.48550/arXiv.2407.07726.
+KevinBlack,NoahBrown,DannyDriess,AdnanEsmail,MichaelEqui,ChelseaFinn,NiccoloFusai,
+  LachyGroom,KarolHausman,BrianIchter,SzymonJakubczak, TimJones,LiyimingKe,Sergey
+  Levine,AdrianLi-Bell,MohithMothukuri,SurajNair,KarlPertsch,LucyXiaoyangShi,James
+  Tanner,QuanVuong,AnnaWalling,HaohuanWang,andUry Zhilinsky. π0: Avision-language-
+  actionflowmodelforgeneralrobotcontrol,2024. URLhttps://arxiv.org/abs/2410.24164.
+
+AnthonyBrohan,NoahBrown,JusticeCarbajal,YevgenChebotar,XiChen,KrzysztofChoromanski,
+  Tianli Ding, Danny Driess, Avinava Dubey, Chelsea Finn, et al.  Rt-2: Vision-language-action
+  models transfer web knowledge to robotic control.arXiv preprint arXiv:2307.15818, 2023a.
+
+Anthony Brohan, Noah Brown, Justice Carbajal, Yevgen Chebotar, Joseph Dabis, Chelsea Finn,
+  Keerthana Gopalakrishnan, Karol Hausman, Alex Herzog, Jasmine Hsu, Julian Ibarz, Brian Ichter,
+  Alex Irpan, Tomas Jackson, Sally Jesmonth, Nikhil J Joshi, Ryan Julian, Dmitry Kalashnikov,
+  Yuheng Kuang, Isabel Leal, Kuang-Huei Lee, Sergey Levine, Yao Lu, Utsav Malla, Deeksha
+  Manjunath, Igor Mordatch, Ofir Nachum, Carolina Parada, Jodilyn Peralta, Emily Perez, Karl
+  Pertsch,JornellQuiambao,KanishkaRao,MichaelRyoo,GreciaSalazar,PannagSanketi,Kevin
+  Sayed,Jaspiar Singh,Sumedh Sontakke,Austin Stone, ClaytonTan,Huong Tran, VincentVan-
+  houcke, Steve Vega, Quan Vuong, Fei Xia, Ted Xiao, Peng Xu, Sichun Xu, Tianhe Yu, and
+  Brianna Zitkovich.  Rt-1:  Robotics transformer for real-world control at scale, 2023b.  URL
+  https://arxiv.org/abs/2212.06817.
+
+Chi-LamCheang, GuangzengChen, Ya Jing,TaoKong,Hang Li,YifengLi, Yuxiao Liu,Hongtao
+  Wu,JiafengXu,YichuYang,HanboZhang,andMinzhaoZhu. Gr-2: Agenerativevideo-language-
+  actionmodelwithweb-scaleknowledgeforrobotmanipulation.arXivpreprintarXiv:2410.06158,
+  2024.
+
+
+                                                      10
+
+===== PAGE 11 =====
+
+Xi Chen, Josip Djolonga, Piotr Padlewski, Basil Mustafa, Soravit Changpinyo, Jialin Wu, Car-
+  losRiquelmeRuiz,SebastianGoodman, XiaoWang, YiTay,SiamakShakeri, MostafaDehghani,
+  DanielSalz,MarioLucic,MichaelTschannen,ArshaNagrani,HexiangHu,MandarJoshi,BoPang,
+  Ceslee Montgomery, PaulinaPietrzyk, Marvin Ritter, AJPiergiovanni, Matthias Minderer, Filip
+  Pavetic, Austin Waters, Gang Li, Ibrahim Alabdulmohsin, Lucas Beyer, Julien Amelot, Kenton
+  Lee,AndreasPeterSteiner,YangLi,DanielKeysers,AnuragArnab,YuanzhongXu,KeranRong,
+  Alexander Kolesnikov, Mojtaba Seyedhosseini, Anelia Angelova, Xiaohua Zhai, Neil Houlsby,
+  and Radu Soricut. Pali-x: On scaling up a multilingual vision and language model, 2023. URL
+  https://arxiv.org/abs/2305.18565.
+
+YuhuiChen, ShuaiTian,Shugao Liu,YingtingZhou, HaoranLi, andDongbin Zhao. Conrft: A rein-
+  forcedfine-tuningmethodforvlamodelsviaconsistencypolicy.arXivpreprintarXiv:2502.05450,
+  2025.
+
+Cheng Chi, Zhenjia Xu, Siyuan Feng, Eric Cousineau, Yilun Du, Benjamin Burchfiel, Russ Tedrake,
+  and Shuran Song.   Diffusion policy:  Visuomotor policy learning via action diffusion.The
+  International Journal of Robotics Research, page 02783649241273668, 2023.
+
+Tianzhe Chu, YuexiangZhai, Jihan Yang, ShengbangTong, Saining Xie, Dale Schuurmans, QuocV
+  Le, Sergey Levine, and Yi Ma. Sft memorizes, rl generalizes: A comparative study of foundation
+  model post-training.arXiv preprint arXiv:2501.17161, 2025.
+
+Open X.-EmbodimentCollaboration, AbhishekPadalkar, AcornPooley, AjinkyaJain, AlexBewley,
+  Alexander Herzog, Alex Irpan, Alexander Khazatsky, Anant Raj, Anikait Singh, Anthony Brohan,
+  Antonin Raffin, Ayzaan Wahid, Ben Burgess-Limerick, Beomjoon Kim, Bernhard Schölkopf,
+  BrianIchter,CewuLu,CharlesXu,ChelseaFinn,ChenfengXu,ChengChi,ChenguangHuang,
+  Christine Chan, Chuer Pan, Chuyuan Fu, Coline Devin, Danny Driess, Deepak Pathak, Dhruv
+  Shah, Dieter Büchler, Dmitry Kalashnikov, Dorsa Sadigh, Edward Johns, Federico Ceola, Fei
+  Xia, Freek Stulp, Gaoyue Zhou, Gaurav S. Sukhatme, Gautam Salhotra, Ge Yan, Giulio Schiavi,
+  Gregory Kahn, Hao Su, Haoshu Fang, Haochen Shi, Heni Ben Amor, Henrik I. Christensen,
+  Hiroki Furuta, Homer Walke, Hongjie Fang, Igor Mordatch, Ilija Radosavovic, and et al. Open
+  x-embodiment: Robotic learning datasets and rt-x models.CoRR, abs/2310.08864, 2023. URL
+  http://dblp.uni-trier.de/db/journals/corr/corr2310.html#abs-2310-08864.
+
+Pim De Haan, Dinesh Jayaraman, and Sergey Levine.   Causal confusion in imitation learning.
+  Advances in neural information processing systems, 32, 2019.
+
+Matt Deitke, Dustin Schwenk, Jordi Salvador, Luca Weihs, Oscar Michel, Eli VanderBilt, Ludwig
+  Schmidt,KianaEhsani,AniruddhaKembhavi,andAliFarhadi. Objaverse: Auniverseofannotated
+  3dobjects. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition,
+  pages 13142–13153, 2023.
+
+Danny Driess, Fei Xia, Mehdi S. M. Sajjadi, Corey Lynch, Aakanksha Chowdhery, Brian Ichter,
+  Ayzaan Wahid, Jonathan Tompson, QuanVuong, Tianhe Yu, WenlongHuang, Yevgen Chebotar,
+  Pierre Sermanet, Daniel Duckworth, Sergey Levine, Vincent Vanhoucke, Karol Hausman, Marc
+  Toussaint, Klaus Greff, Andy Zeng, Igor Mordatch, and Pete Florence. Palm-e: An embodied
+  multimodal language model, 2023. URLhttps://arxiv.org/abs/2303.03378.
+
+CunxinFan,XiaosongJia,YihangSun,YixiaoWang,JianglanWei,ZiyangGong,XiangyuZhao,
+  MasayoshiTomizuka,XueYang, Junchi Yan,andMingyuDing. Interleave-vla: Enhancingrobot
+  manipulation with interleaved image-text instructions, 2025. URLhttps://arxiv.org/abs/
+  2505.02152.
+
+RoyaFiroozi,JohnathanTucker,StephenTian,AnirudhaMajumdar,JiankaiSun,WeiyuLiu,Yuke
+  Zhu, Shuran Song, Ashish Kapoor, Karol Hausman, et al. Foundation models in robotics: Ap-
+  plications, challenges, and the future.The International Journal of Robotics Research, page
+  02783649241281508, 2023.
+
+DylanJFoster,AdamBlock,andDipendraMisra. Isbehaviorcloningallyouneed? understanding
+  horizon in imitation learning.arXiv preprint arXiv:2407.15007, 2024.
+
+
+                                                      11
+
+===== PAGE 12 =====
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+  Shirong Ma, PeiyiWang, XiaoBi, et al. Deepseek-r1: Incentivizing reasoning capability in llms
+  via reinforcement learning.arXiv preprint arXiv:2501.12948, 2025a.
+Runlin(Kolin)Guo,XinsongLin,MinghuaLiu,JiayuanGu,andHaoSu.Mplib: alightweightmotion
+  planning library, 2024. URLhttps://github.com/haosulab/MPlib. Accessed: 2024-05-13.
+Yanjiang Guo, Jianke Zhang, Xiaoyu Chen, Xiang Ji, Yen-Jen Wang, Yucheng Hu, and Jianyu
+  Chen. Improvingvision-language-actionmodelwithonlinereinforcementlearning.arXivpreprint
+  arXiv:2501.16664, 2025b.
+EdwardJHu,yelongshen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,
+  and Weizhu Chen.  LoRA: Low-rank adaptation of large language models.  InInternational
+  Conference on Learning Representations, 2022. URL                  https://openreview.net/forum?id=
+  nZeVKeeFYf9.
+JiahengHu,RoseHendrix,AliFarhadi,AniruddhaKembhavi,RobertoMartín-Martín,PeterStone,
+  Kuo-Hao Zeng, and Kiana Ehsani. Flare: Achieving masterful and adaptive robot policies with
+  large-scale reinforcement learning fine-tuning.arXiv preprint arXiv:2409.16578, 2024.
+Jingcheng Hu, Yinmin Zhang, Qi Han, Daxin Jiang, Xiangyu Zhang, and Heung-Yeung Shum.
+  Open-reasoner-zero: Anopensourceapproachtoscalingupreinforcementlearningonthebase
+  model.arXiv preprint arXiv:2503.24290, 2025.
+Wenxuan Huang,Bohan Jia, ZijieZhai, Shaosheng Cao,Zheyu Ye, FeiZhao, Zhe Xu,Yao Hu, and
+  Shaohui Lin. Vision-r1: Incentivizing reasoning capability in multimodal large language models.
+  arXiv preprint arXiv:2503.06749, 2025.
+Physical Intelligence, Kevin Black, Noah Brown, James Darpinian, Karan Dhabalia, Danny Driess,
+  Adnan Esmail, Michael Equi, Chelsea Finn, Niccolo Fusai, Manuel Y. Galliker, Dibya Ghosh,
+  LachyGroom,KarolHausman,BrianIchter,SzymonJakubczak,TimJones,LiyimingKe,Devin
+  LeBlanc, Sergey Levine, Adrian Li-Bell, Mohith Mothukuri, Suraj Nair, Karl Pertsch, Allen Z.
+  Ren,LucyXiaoyangShi,LauraSmith,JostTobiasSpringenberg,KyleStachowicz,JamesTanner,
+  QuanVuong,Homer Walke,AnnaWalling,HaohuanWang,LiliYu, andUryZhilinsky. π0.5  : a
+  vision-language-actionmodelwithopen-worldgeneralization,2025. URLhttps://arxiv.org/
+  abs/2504.16054.
+HamishIvison,YizhongWang,JiachengLiu,ZeqiuWu,ValentinaPyatkin,NathanLambert,NoahA
+  Smith,YejinChoi,andHannaHajishirzi. Unpacking dpoandppo: Disentanglingbest practices
+  for learning from preference feedback.Advances in neural information processing systems, 37:
+  36602–36633, 2024.
+Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richardson, Ahmed El-Kishky, Aiden Low, Alec
+  Helyar,AleksanderMadry,AlexBeutel,AlexCarney,etal. Openaio1systemcard.arXivpreprint
+  arXiv:2412.16720, 2024.
+Siddharth Karamcheti, Suraj Nair, Ashwin Balakrishna, Percy Liang, Thomas Kollar, and Dorsa
+  Sadigh. Prismaticvlms: Investigatingthedesignspaceofvisually-conditionedlanguagemodels.
+  InInternational Conference on Machine Learning (ICML), 2024.
+Timo Kaufmann, Paul Weng, Viktor Bengs, and Eyke Hüllermeier.  A survey of reinforcement
+  learning from human feedback.arXiv preprint arXiv:2312.14925, 10, 2023.
+Alexander Khazatsky, Karl Pertsch, Suraj Nair, Ashwin Balakrishna, Sudeep Dasari, Siddharth
+  Karamcheti,SoroushNasiriany,MohanKumarSrirama,LawrenceYunliangChen,KirstyEllis,
+  Peter David Fagan, Joey Hejna, Masha Itkina, Marion Lepert, Yecheng Jason Ma, Patrick Tree
+  Miller, Jimmy Wu, Suneel Belkhale, Shivin Dass, Huy Ha, Arhan Jain, Abraham Lee, Youngwoon
+  Lee, Marius Memmel, Sungjae Park, Ilija Radosavovic, Kaiyuan Wang, Albert Zhan, Kevin Black,
+  Cheng Chi, Kyle Beltran Hatch, Shan Lin, Jingpei Lu, Jean Mercat, Abdul Rehman, Pannag R
+  Sanketi, Archit Sharma, Cody Simpson, Quan Vuong, Homer Rich Walke, Blake Wulfe, Ted
+  Xiao, Jonathan Heewon Yang, Arefeh Yavary, Tony Z. Zhao, Christopher Agia, Rohan Baijal,
+  Mateo Guaman Castro, Daphne Chen, Qiuyu Chen, Trinity Chung, Jaimyn Drake, Ethan Paul
+  Foster, Jensen Gao, David Antonio Herrera, Minho Heo, Kyle Hsu, Jiaheng Hu, Donovon Jackson,
+
+
+                                                     12
+
+===== PAGE 13 =====
+
+  Charlotte Le, Yunshuang Li, Xinyu Lin, Zehan Ma, Abhiram Maddukuri, Suvir Mirchandani,
+  Daniel Morton, Tony Khuong Nguyen, Abigail O’Neill, Rosario Scalise, Derick Seale, Victor
+  Son, Stephen Tian, Emi Tran, Andrew E. Wang, Yilin Wu, Annie Xie, Jingyun Yang, Patrick
+  Yin, Yunchu Zhang, Osbert Bastani, Glen Berseth, Jeannette Bohg, Ken Goldberg, Abhinav
+  Gupta, Abhishek Gupta, Dinesh Jayaraman, Joseph J Lim, Jitendra Malik, Roberto Martín-
+  Martín, Subramanian Ramamoorthy, Dorsa Sadigh, Shuran Song, Jiajun Wu, Michael C. Yip,
+  YukeZhu,ThomasKollar,SergeyLevine,andChelseaFinn. DROID:Alarge-scalein-the-wild
+  robotmanipulationdataset. InRSS2024Workshop: DataGenerationforRobotics,2024. URL
+  https://openreview.net/forum?id=Ml2pTYLNLi.
+
+Moo Jin Kim, Karl Pertsch, Siddharth Karamcheti, Ted Xiao, Ashwin Balakrishna, Suraj Nair,
+  Rafael Rafailov, Ethan Foster, Grace Lam, Pannag Sanketi, et al.  Openvla:  An open-source
+  vision-language-action model.arXiv preprint arXiv:2406.09246, 2024.
+
+MooJinKim,ChelseaFinn,andPercyLiang.Fine-tuningvision-language-actionmodels: Optimizing
+  speed and success.arXiv preprint arXiv:2502.19645, 2025.
+
+Vijay Konda and John Tsitsiklis. Actor-critic algorithms.Advances in neural information processing
+  systems, 12, 1999.
+
+XuanlinLi,KyleHsu,JiayuanGu,KarlPertsch,OierMees,HomerRichWalke,ChuyuanFu,Ishikaa
+  Lunawat, Isabel Sieh, Sean Kirmani, et al. Evaluating real-world robot manipulation policies in
+  simulation.arXiv preprint arXiv:2405.05941, 2024a.
+
+ZiniuLi,TianXu,YushunZhang,ZhihangLin,YangYu,RuoyuSun,andZhi-QuanLuo. Remax:
+  A simple, effective, and efficient reinforcement learning method for aligning large language
+  models.  InForty-first International Conference on Machine Learning, 2024b.  URL                  https:
+  //openreview.net/forum?id=Stn8hXkpe6.
+
+Fanqi Lin, Yingdong Hu, Pingyue Sheng, Chuan Wen, Jiacheng You, and Yang Gao. Data scaling
+  lawsinimitationlearningforroboticmanipulation,2025. URLhttps://arxiv.org/abs/2410.
+  18647.
+
+Songming Liu, Lingxuan Wu, Bangguo Li, Hengkai Tan, Huayu Chen, Zhengyi Wang, Ke Xu, Hang
+  Su,andJunZhu. Rdt-1b: adiffusionfoundationmodelforbimanualmanipulation.arXivpreprint
+  arXiv:2410.07864, 2024.
+
+YuechengLiu,DafengChi,ShiguangWu,ZhanguangZhang,YaochenHu,LingfengZhang,Yingxue
+  Zhang,ShuangWu,TongtongCao, Guowei Huang,etal. Spatialcot: Advancingspatialreasoning
+  throughcoordinatealignmentandchain-of-thoughtforembodiedtaskplanning.arXivpreprint
+  arXiv:2501.10074, 2025.
+
+YanMa,SteffiChern,XuyangShen,YiranZhong,andPengfeiLiu. Rethinkingrlscalingforvision
+  languagemodels: Atransparent,from-scratchframeworkandcomprehensiveevaluationscheme.
+  arXiv preprint arXiv:2504.02587, 2025.
+
+YueenMa,ZixingSong,YuzhengZhuang,JianyeHao,andIrwinKing. Asurveyonvision-language-
+  action models for embodied ai.arXiv preprint arXiv:2405.14093, 2024.
+
+Max Sobol Mark, Tian Gao, Georgia Gabriela Sampaio, Mohan Kumar Srirama, Archit Sharma,
+  ChelseaFinn,andAviralKumar. Policyagnosticrl: Offlinerlandonlinerlfine-tuningofanyclass
+  and backbone.arXiv preprint arXiv:2412.06685, 2024.
+
+Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov,
+  PierreFernandez,DanielHaziza,FranciscoMassa,AlaaeldinEl-Nouby,etal. Dinov2: Learning
+  robust visual features without supervision.arXiv preprint arXiv:2304.07193, 2023.
+
+LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,Chong
+  Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow
+  instructions with human feedback.Advances in neural information processing systems, 35:27730–
+  27744, 2022.
+
+
+                                                     13
+
+===== PAGE 14 =====
+
+Hung Pham and Quang-Cuong Pham.   A new approach to time-optimal path parameterization
+  based on reachability analysis.IEEE Transactions on Robotics, 34(3):645–659, 2018.   doi:
+  10.1109/TRO.2018.2819195.
+
+RafaelFigueiredoPrudencio,MarcosROAMaximo,andEstherLunaColombini. Asurveyonoffline
+  reinforcement learning: Taxonomy, review, and open problems.IEEE Transactions on Neural
+  Networks and Learning Systems, 2023.
+
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea
+  Finn. Directpreferenceoptimization: Yourlanguagemodelissecretlyarewardmodel.Advances
+  in Neural Information Processing Systems, 36:53728–53741, 2023.
+
+Rajkumar Ramamurthy, Prithviraj Ammanabrolu, Kianté Brantley, Jack Hessel, Rafet Sifa, Christian
+  Bauckhage, Hannaneh Hajishirzi, and Yejin Choi.  Is reinforcement learning (not) for natural
+  language processing: Benchmarks, baselines, and building blocks for natural language policy
+  optimization, 2023. URLhttps://arxiv.org/abs/2210.01241.
+
+AllenZRen,JustinLidard,LarsLAnkile,AnthonySimeonov,PulkitAgrawal,AnirudhaMajumdar,
+  Benjamin Burchfiel, Hongkai Dai, and Max Simchowitz. Diffusion policy policy optimization.
+  arXiv preprint arXiv:2409.00588, 2024.
+
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer.  High-
+  resolution image synthesis with latent diffusion models. InProceedings of the IEEE/CVF confer-
+  ence on computer vision and pattern recognition, pages 10684–10695, 2022.
+
+Stephane Ross and Drew Bagnell. Efficient reductions for imitation learning. In Yee Whye Teh and
+  Mike Titterington, editors,Proceedings of the Thirteenth International Conference on Artificial
+  IntelligenceandStatistics,volume9ofProceedingsofMachineLearningResearch,pages661–
+  668,ChiaLagunaResort,Sardinia,Italy,13–15May2010.PMLR. URLhttps://proceedings.
+  mlr.press/v9/ross10a.html.
+
+JohnSchulman,PhilippMoritz,SergeyLevine,MichaelJordan,andPieterAbbeel. High-dimensional
+  continuous control using generalized advantage estimation.arXiv preprint arXiv:1506.02438,
+  2015.
+
+JohnSchulman,FilipWolski,PrafullaDhariwal,AlecRadford,andOlegKlimov. Proximalpolicy
+  optimization algorithms.arXiv preprint arXiv:1707.06347, 2017.
+
+DhruvShah,BlazejOsinski,BrianIchter,andSergeyLevine. LM-nav: Roboticnavigationwithlarge
+  pre-trained models of language, vision, and action. In6th Annual Conference on Robot Learning,
+  2022. URLhttps://openreview.net/forum?id=UW5A3SweAH.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+  Mingchuan Zhang, YK Li, Y Wu, et al.  Deepseekmath: Pushing the limits of mathematical
+  reasoning in open language models.arXiv preprint arXiv:2402.03300, 2024.
+
+NisanStiennon, LongOuyang,JeffreyWu, DanielZiegler, RyanLowe, ChelseaVoss, AlecRadford,
+  Dario Amodei,and PaulF Christiano. Learning to summarizewith humanfeedback.Advances in
+  neural information processing systems, 33:3008–3021, 2020.
+
+Austin Stone, Ted Xiao, Yao Lu, Keerthana Gopalakrishnan, Kuang-Huei Lee, Quan Vuong, Paul
+  Wohlhart,SeanKirmani,BriannaZitkovich,FeiXia,etal. Open-worldobjectmanipulationusing
+  pre-trained vision-language models.arXiv preprint arXiv:2303.00905, 2023.
+
+Stone Tao, Fanbo Xiang, Arth Shukla, Yuzhe Qin, Xander Hinrichsen, Xiaodi Yuan, Chen Bao,
+  XinsongLin,YulinLiu,Tse-kaiChan,etal. Maniskill3: Gpuparallelizedroboticssimulationand
+  rendering for generalizable embodied ai.arXiv preprint arXiv:2410.00425, 2024.
+
+KimiTeam, AngangDu,BofeiGao, BoweiXing,ChangjiuJiang, ChengChen,ChengLi, Chenjun
+  Xiao, Chenzhuang Du, Chonghua Liao, et al. Kimi k1. 5: Scaling reinforcement learning with
+  llms.arXiv preprint arXiv:2501.12599, 2025.
+
+
+                                                      14
+
+===== PAGE 15 =====
+
+Octo Model Team, Dibya Ghosh, Homer Walke, Karl Pertsch, Kevin Black, Oier Mees, Sudeep
+  Dasari, Joey Hejna, Tobias Kreiman, Charles Xu, et al. Octo: An open-source generalist robot
+  policy.arXiv preprint arXiv:2405.12213, 2024.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+  Bashlykov,SoumyaBatra, PrajjwalBhargava, ShrutiBhosale,et al. Llama2: Openfoundation
+  and fine-tuned chat models.arXiv preprint arXiv:2307.09288, 2023.
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,Łukasz
+  Kaiser, and IlliaPolosukhin. Attention isall you need.Advances in neural information processing
+  systems, 30, 2017.
+Homer Rich Walke, Kevin Black, Tony Z. Zhao, Quan Vuong, Chongyi Zheng, Philippe Hansen-
+  Estruch, Andre Wang He, Vivek Myers, Moo Jin Kim, Max Du, Abraham Lee, Kuan Fang,
+  Chelsea Finn, and Sergey Levine. Bridgedata v2: A dataset for robot learning at scale. In7th
+  Annual Conference on Robot Learning, 2023.  URL               https://openreview.net/forum?id=
+  f55MlAT1Lu.
+Junjie Wen, Yichen Zhu, Jinming Li, Zhibin Tang, Chaomin Shen, and Feifei Feng.   Dexvla:
+  Vision-language model with plug-in diffusion expert for general robot control.arXiv preprint
+  arXiv:2502.05855, 2025.
+Hongtao Wu, Ya Jing, Chilam Cheang, Guangzeng Chen, Jiafeng Xu, Xinghang Li, Minghuan Liu,
+  Hang Li, and Tao Kong.  Unleashing large-scale video generative pre-training for visual robot
+  manipulation, 2023.
+Shusheng Xu, Wei Fu, Jiaxuan Gao, Wenjie Ye, Weilin Liu, Zhiyu Mei, Guangju Wang, Chao Yu,
+  and Yi Wu.  Is dpo superior to ppo for llm alignment? a comprehensive study. arXiv preprint
+  arXiv:2404.10719, 2024.
+Simon Zhai, Hao Bai, Zipeng Lin, Jiayi Pan, Peter Tong, Yifei Zhou, Alane Suhr, Saining Xie, Yann
+  LeCun, Yi Ma, et al. Fine-tuning large vision-language models as decision-making agents via
+  reinforcement learning.Advances in neural information processing systems, 37:110935–110971,
+  2024.
+XiaohuaZhai, Basil Mustafa,Alexander Kolesnikov,and LucasBeyer. Sigmoid lossfor language
+  image pre-training. InProceedings of the IEEE/CVFinternational conference on computer vision,
+  pages 11975–11986, 2023.
+Biao Zhang, Zhongtao Liu, Colin Cherry, and Orhan Firat. When scaling meets llm finetuning: The
+  effect of data, model and finetuning method.arXiv preprint arXiv:2402.17193, 2024a.
+Lvmin Zhang, Anyi Rao, and Maneesh Agrawala.  Adding conditional control to text-to-image
+  diffusion models. InProceedings ofthe IEEE/CVF international conference oncomputer vision,
+  pages 3836–3847, 2023a.
+Shengyu Zhang,Linfeng Dong, Xiaoya Li,Sen Zhang, Xiaofei Sun,Shuhe Wang, JiweiLi, Runyi
+  Hu, Tianwei Zhang, Fei Wu, et al. Instruction tuning for large language models: A survey.arXiv
+  preprint arXiv:2308.10792, 2023b.
+ZijianZhang,KaiyuanZheng,ZhaorunChen,JoelJang,YiLi,SiweiHan,ChaoqiWang,Mingyu
+  Ding, Dieter Fox, and Huaxiu Yao. Grape: Generalizing robot policy via preference alignment.
+  arXiv preprint arXiv:2411.19309, 2024b.
+Tony Z Zhao, Vikash Kumar, Sergey Levine, and Chelsea Finn. Learning fine-grained bimanual
+  manipulation with low-cost hardware.arXiv preprint arXiv:2304.13705, 2023.
+WeiZhao,PengxiangDing,MinZhang,ZhefeiGong,ShuanghaoBai,HanZhao,andDonglinWang.
+  Vlas: Vision-language-action model with speech instructions for customized robot manipulation.
+  arXiv preprint arXiv:2502.13508, 2025.
+RuiZheng,ShihanDou,SongyangGao,YuanHua,WeiShen,BinghaiWang,YanLiu,SenjieJin,
+  QinLiu,YuhaoZhou,etal. Secretsofrlhfinlargelanguagemodelsparti: Ppo.arXivpreprint
+  arXiv:2307.04964, 2023.
+
+
+                                                       15
+
+===== PAGE 16 =====
+
+Ruijie Zheng, Yongyuan Liang, Shuaiyi Huang, Jianfeng Gao, Hal Daumé III, Andrey Kolobov,
+  Furong Huang, and Jianwei Yang. Tracevla: Visual trace prompting enhances spatial-temporal
+  awareness for generalist robotic policies.arXiv preprint arXiv:2412.10345, 2024.
+Deyao Zhu, Jun Chen, Xiaoqian Shen, Xiang Li, and Mohamed Elhoseiny.   Minigpt-4:  En-
+  hancing vision-language understanding with advanced large language models.arXiv preprint
+  arXiv:2304.10592, 2023.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                       16
+
+===== PAGE 17 =====
+
+A   Implementation Details
+
+A.1   Implementation of different fine-tuning algorithm
+
+LoRA finetuningInstead of fine-tuning the entire OpenVLA model, we use Low-Rank Adaptation
+(LoRA) (Hu et al., 2022) to reduce computational costs for all fine-tuning methods in this paper,
+including both RL and SFT. Specifically, we apply LoRA modules with rankr= 32  to all linear
+layers in the OpenVLA model, while fully fine-tuning the value head.
+
+PPO updateThepolicyis updated bymaximizing the followingobjective(Schulman etal., 2017)   πθ(a t|s t)  πθ(a t|s t)
+
+          LCLIP(θ) =E      t  min                                                                       ˆAt          (1)
+                                      πθold(a t|s t) ˆAt,clip      πθold(a t|s t),1−ϵ,1+ϵ
+where πθ(a t |s t) is calculated as the product of the probabilities of each action token, and the
+advantage ˆAt is given by Generalized Advantage Estimator (GAE) (Schulman et al., 2015), where
+
+                                     T−t−1X
+                              ˆAt =          (γλ)    l[r t+l    +γV(s       t+l+1    )−V(s         t+l   )]                                (2)
+
+                                       l=0
+
+GRPOimplementationWefollow theoutcomesupervisionRL paradigminGRPO(Shao etal.,
+2024), where the advantage is computed as the normalized outcome rewards within each group:
+                                               ˆAit = ri−mean(r)
+                                                          std(r)                                                                           (3)
+                                                r={r        1,r2,···,r  G}                                                      (4)
+whereri is theoutcome reward for trajectoryi, andGdenotes thenumber oftrajectories ina group.
+To stabilize training, we use a total of 32 groups, each containing 8 trajectories.  For successful
+placement episodes, the trajectory is truncated immediately after the first successful step. In contrast,
+unsuccessfulepisodes remainuntruncated. Theoutcome reward isgiven onlyat thefinal stepof each
+episode and is defined as the sum of the grasping, holding, and placement rewards.
+
+DPO implementationWe employ an improved version of DPO as proposed by (Zhang et al.,
+2024b),namelyTrajectory-wisePreferenceOptimization(TPO),whichfine-tunesthevision-language
+agent (VLA) by aligning its policy with human preferences over entire trajectories, rather than
+individual actions. This is achieved by comparingpairs of trajectories (one preferred, one rejected)
+and optimizing the following loss:
+
+                  LTPO =−E       (ζ w,ζl)∼D     logσ     β    log  πθ(ζ w)πref(ζ w)−log    πθ(ζ l)πref(ζ l)          (5)
+
+whereζ          w andζ      l are the preferred and rejected trajectories, respectively.
+IntheoriginalTPOpaper(Zhangetal.,2024b),thetotalrewardconsistsofatasksuccessreward,
+a self-evaluated score, and an LLM-generated dense reward. In our task, only a sparse reward is
+available, as described in Sec. 5.1. Therefore, we use only this sparse reward for simplicity.
+
+A.2   Details of motion planner and SFT dataset
+
+Weuse the “plan_screw”function provided by(Guo etal., 2024). In detail,we employ atask-space
+guided iterative inverse kinematics method to generate a locally feasible path that approximates a
+screw (helical) motion, using the robot’s kinematic model (fromURDF) and the currentjoint angles.
+This path is then post-processed using a Time-Optimal Path Parameterization algorithm (TOPP)
+(Pham andPham, 2018), whichassigns timing characteristicsto thegeometric path, resultingin an
+efficientandexecutabletrajectory(injointspace)thatsatisfiestherobot’skinematicconstraints. We
+performforwardkinematicsontheoutputjointpositionsandrobotcurrentjointpositionstoobtain
+thecorrespondingend-effectorposes,andthencomputetheirdifferencestoobtain“delta_ee_pose”.
+However, data collected by the motion planner contains a fraction of idling actions. When trained
+withSFTonsuchdata,thefine-tunedOpenVLAmodeloftengetsstuckduringtaskexecution. To
+
+
+                                                           17
+
+===== PAGE 18 =====
+
+addressthis,weemployanactionfilteringtechnique: actionswithadeltapositionnormlessthan0.01
+andadeltaEuleranglenormlessthan0.06arediscarded. Usingthisfilter,approximatelyone-third
+of the actions are removed, which significantly alleviates the issue of the model getting stuck. We
+apply action filtering to all data collected by the motion planner.
+
+A.3   Details of assets usage
+
+As described in Sec. 5.1, we acquire digital assets from multiple sources. The 3D assets of objects
+and receptacles are sourcedfrom theManiSkill simulator(Tao etal., 2024), Objaverse (Deitkeet al.,
+2023),ordownloadedfromSketchfab3. AdditionaltableappearancesaresynthesizedusingStable
+Diffusion(Rombachetal.,2022)andControlNet(Zhangetal.,2023a);specifically,weusetheonline
+serviceprovidedbyLibLibAI4.DistractortexturesaredownloadedfromambientCG5.Wecomply
+with the licenses of these assets accordingly.
+
+A.4   Details of tasks for generalization evaluation
+
+AsdescribedinSec.5.1,webuildmultipletaskstotestthegeneralizationofVLAmodes. Thedetails
+of each task is detailed as below:
+
+        • Training: Atthestartofeachepisode,oneobjectfromthe         16trainingobjectsandoneofthe
+          16training tableappearances isselected. Theobject andthe receptacle(yellowplate) are
+          placed on the table, with their positions randomized within a rectangular area on the table.
+          The language instruction is “put $O$on $R$”, where$O$ and $R$ denote the names of the
+          object and receptacle, respectively.
+        • UnseenTable: Thetableappearance isselectedfrom       5unseenappearances. Othersettings
+          are the same as in theTrainingsetting.
+        • DynamicTexture(weak): Inadditiontoselectingan objectandatableappearance, atexture
+          from the 16 textures is chosen at the start of each episode.  This texture is cropped and
+          resizeddifferentlyateachstepintheepisode,andisoverlaidontopoftheobject,receptacle,
+          and robot arm in the image, with an image mixing transparency of0.3.
+        • Dynamic Texture (strong): The settings are the same as in theDynamic Texture (weak)
+          setting, except with an image mixing transparency of0.5.
+        • DynamicNoise (weak): Inaddition toselectinganobject andatable appearance,atexture
+          from the 16 textures is chosen at the start of each episode.  This texture is cropped and
+          resizeddifferentlyateachstepintheepisode,andisoverlaidonwholeimage,withanimage
+          mixing transparency of0.3.
+        • Dynamic Noise (strong): Thesettings are the same asin theDynamic Noise (weak)setting,
+          except with an image mixing transparency of0.5.
+        • Unseen Objects: The object is selected from the            9 unseen objects. Other settings are the
+          same as in theTrainingsetting.
+        • Unseen Receptacles: In addition to selecting an object and a table appearance, a receptacle
+          from the16 unseen receptaclesis chosenat the startof eachepisode, replacing thedefault
+          training receptacle (yellow plate). Other settings are the same as in theTrainingsetting.
+        • Unseen Instruction Phrasing: In addition to selecting an object and a table appearance, a
+          language instruction template from the16 unseen language templates is chosen at the start
+          ofeachepisode,replacingthedefaultlanguagetemplate(“put$O$on$R$”). Othersettings
+          are the same as in theTrainingsetting. The unseen language templates are:
+             –Place the $O$ on the $R$
+             –set $O$ on $R$
+             –move the $O$ to the $R$
+             –Take the $O$ and put it on the $R$
+
+   3https://sketchfab.com/
+   4https://liblib.art/
+   5https://ambientcg.com/
+
+
+                                                         18
+
+===== PAGE 19 =====
+
+             –pick up $O$ and set it down on $R$
+             –please put the $O$ on the $R$
+             –Put $O$ onto $R$.
+             –place the $O$ onto the $R$ surface
+             –Make sure $O$ is on $R$.
+             –on the $R$, put the $O$
+             –put the $O$ where the $R$ is
+             –Move the $O$ from the table to the $R$
+             –Move $O$ so it’s on $R$.
+             –Can you put $O$ on $R$?
+             –$O$ on the $R$, please.
+             –the $O$ should be placed on the $R$.
+          Notethattherearevariationsinpunctuationandcapitalizationintheseinstructiontemplates.
+        • Multi-Object (both seen)At the start of each episode, two different objects from the        16
+          training objects and one of the16 training table appearances is selected. These two objects
+          and the receptacle (yellow plate) are placed on the table, with their positions randomized
+          withinarectangulararea onthetable. Thelanguageinstruction is“put$O$on$R$”,where
+          $O$ and $R$ denote the names of the fist object and receptacle, respectively.
+        • Multi-Object(bothunseen)Thetwoobjectsareselectedfrom the           9 unseenobjects,andthey
+          aredifferentfromeachother. OthersettingsarethesameasintheMulti-Object(bothseen)
+          setting.
+        • DistractiveReceptacle: Inadditiontoselectinganobjectandatableappearance,adistractive
+          receptaclefromthe16unseenreceptaclesischosenatthestartofeachepisode,andplaced
+          on the table without being used. Other settings are the same as in theTrainingsetting.
+        • Multi-Receptacle(bothunseen): Atthestartofeachepisode,anobjectsfromthe           16training
+          objects,two differentreceptaclesfromthe16unseenreceptacles, andoneof the16training
+          tableappearancesisselected. Theobjectandthetworeceptaclesareplacedonthetable,with
+          their positionsrandomized within a rectangulararea on the table. The languageinstruction
+          is “put $O$ on $R$”, where $O$ and $R$ denote the names of the object and the first
+          receptacle, respectively.
+        • Unseen Position (Object & Receptacle): The object and the receptacle (yellow plate) are
+          placed on the table, with their positions randomized within a surrounding square frame,
+          larger than the rectangular area, on the table. Other settings are the same as in theTraining
+          setting.
+        • Unseen Robot Init Pose: The initial pose of each articulation of the robot is randomized
+          atthestartofeachepisode,ratherthanbeingsettoafixedposeasintheTrainingsetting.
+          Other settings are the same as in theTrainingsetting.
+        • Mid-Episode Object Reposition: The object is teleported to a new random position on the
+          tableatthe5-thtimestepinanepisode. OthersettingsarethesameasintheTrainingsetting.
+
+B   Additional Experiment Results
+
+B.1   PPO performance on generation temperature
+
+WeevaluatetheperformanceofPPOwithdifferentgenerationtemperaturesduringtraining,asshown
+in Fig. 10.  The results show that a very large temperature hinders the training process, while a
+moderateor smalltemperature leadstogood performance. Therefore, weusea temperatureof1.0    in
+PPO.
+
+B.2   PPO performance on LoRA rank
+
+We evaluate the performance of PPO with different LoRA ranks, as shown in Fig. 11. The results
+show that a lower LoRA rank leads to slightly more efficient training.  In all of our fine-tuning
+experiments,weuseaLoRArankof32toensuresufficientmodelcapacity. Amoredetailedstudyof
+different LoRA ranks is left for future work.
+
+
+                                                         19
+
+===== PAGE 20 =====
+
+                Figure 10: PPO performance on generation temperature during training.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                           Figure 11: PPO performance on different LoRA rank.
+
+
+B.3   Full results of OOD tasks
+
+Detailed results of Fig. 7 arelisted in Tab.1, where grasp accuracy, continuous grasp accuracy and
+task success rate are reported.
+
+B.4   Performance comparison on sim-to-real generalization
+
+As discussed, all of our previous experiments are conducted in simulation for scalability and repro-
+ducibility when comparing RL and SFT. Nonetheless, real-world performance is a critical factor to
+validate. We therefore include a preliminary real-world experiment to assess sim-to-real generaliz-
+ability.
+Specifically,wereplacedtheWidowXarmwithaFrankaPandaandalignedthecameraviews. Using
+thesamepipelineasinourmainexperiments,weretrainedVLAmodelswithbothRLandSFTunder
+this configuration, and deployed them zero-shot on the real robot. This naturally introduces an OOD
+setting involving kinematic differences, varied backgrounds, and different real-world objects and
+receptacles.
+Insimulation,thetrainingenvironmentcontains16objects(asdescribedinSec.5.1),7backgrounds,
+andaplateasthereceptacle. Thereal-worldevaluationinvolves6newobjects(pepper,cucumber,
+banana,mangosteen, kiwi,sponge),atableas thebackground,andagreenbowlasthereceptacle. In
+both simulationand real-world setups,the initial positionsof objects andreceptacles are randomized.
+For real-world evaluation, the initial conditions of each trail are aligned across SFT and RL to ensure
+a fair comparison. The training and evaluation environments are illustrated in Fig. 12.
+Wereport the averageperformance over 30real-world trials inTab. 2. Theresults show thatRL out-
+performs SFT in both grasp and pick-and-place success rates, demonstrating stronger generalization
+ability. Qualitatively, we observed that SFT often exhibits excessive movement and overshooting,
+leading to suboptimal grasp poses and failures. In contrast, RL shows some jitter but successfully
+iteratively adjusts the end-effector pose, leading to higher grasp success.
+
+
+                                                         20
+
+===== PAGE 21 =====
+
+Table1: Detailed resultsacrossdifferenttasks,withthe bestresultsacrossSFTandRL highlighted
+inbold. Standard deviations are reported in parentheses.
+                                      Acc.                          Cont. Acc.                             Suc.
+                             SFT               RL               SFT               RL              SFT               RL
+         IND             0.922(.013)0.974(.007)             0.906(.026)0.948(.007)            0.781(.013)0.938(.013)
+        Table            0.880(.032)0.979(.007)             0.828(.022)0.927(.019)            0.719(.051)0.844(.034)
+     Texture-w           0.896(.019)0.948(.019)             0.870(.039)0.906(.046)            0.719(.078)0.833(.048)
+      Texture-s          0.839(.019)0.802(.039)             0.750(.034)0.703(.066)            0.557(.041)0.630(.039)
+      Noise-w            0.901(.019)0.948(.027)             0.854(.041)0.911(.027)            0.708(.032)0.854(.027)
+       Noise-s           0.781(.013)0.823(.041)             0.688(.034)0.750(.038)            0.505(.027)0.667(.048)
+         Obj.            0.818(.027)0.875(.000)             0.724(.032)0.833(.039)            0.453(.044)0.714(.019)
+       Recep.            0.844(.013)0.911(.039)             0.802(.032)0.833(.019)            0.615(.019)0.750(.022)
+       Instruct          0.885(.045)0.969(.013)             0.859(.044)0.948(.027)            0.672(.034)0.891(.034)
+  M-Obj. (IND)           0.797(.013)0.823(.027)             0.771(.019)0.797(.051)            0.615(.052)0.750(.046)
+  M-Obj. (OOD)           0.656(.034)0.750(.046)             0.583(.019)0.688(.038)            0.297(.013)0.578(.034)
+  Disturb Recep.         0.880(.032)0.948(.007)             0.844(.044)0.896(.027)            0.672(.056)0.812(.034)
+     M-Recep.            0.865(.019)0.885(.007)             0.818(.041)0.797(.034)            0.458(.065)0.599(.063)
+     Obj. Pos.           0.865(.019)0.943(.007)             0.802(.007)0.917(.019)            0.568(.070)0.807(.019)
+    Robot Pose           0.646(.027)0.917(.063)             0.568(.019)0.844(.071)            0.339(.052)0.797(.064)
+     Obj. Rep.           0.573(.039)0.891(.034)             0.474(.060)0.807(.045)            0.286(.041)0.745(.048)
+
+
+
+
+
+
+
+
+
+
+            (a)                              (b)                              (c)                              (d)
+Figure 12: Visualization of the training and evaluation environments for the preliminary real-world
+evaluation: (a)-(b) examples of simulation training environments; (c)-(d) examples of real-world
+evaluation settings.
+
+
+
+B.5   Performance comparison with action chunk
+
+Toevaluatetherobustnessofourconclusionswithstrongerarchitectures,weadditionallytestwith
+OpenVLA-OFT (Kim et al., 2025), which enhance OpenVLA with action chunking.
+We adopted an action chunking strategy with a chunk size of 4, enabling the model to predict
+sequences of actions rather than single steps. To initialize training, we first collected 400 trajectories
+through motion planning without applying any action filtering, and then trained a warm-up model
+using a checkpoint from Huggingface6.
+Building on this, we conducted RL fine-tuning in which each observation corresponds to a se-
+quenceof 4actionsandis optimized basedoncumulativerewardsonthefollowing4steps. Given
+the increased dimensionality of the action space, we adjusted the PPO algorithm by introducing
+action-dimension-wiseclipping,reducingtheclippingratiofrom0.2to0.1,andtuningthehyperpa-
+rameters with discount factorγ= 0.96and GAEλ= 0.85to improve training stability.
+Results are summarized in Fig. 13 and Tab. 3, showing that RL maintains its advantage over SFT
+even under this more advanced architecture.
+
+
+
+
+    6Haozhan72/Openvla-oft-SFT-libero10-trajall
+
+
+                                                              21
+
+===== PAGE 22 =====
+
+Table 2: Preliminary real-world evaluation results. RL fine-tuning in simulation helps sim-to-real
+transfer compared to SFT.
+                                                                       SFT     RL
+                                       Grasp Success Rate            0.100.43
+                                 Pick-and-Place Success Rate    0.000.27
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure13: PerformancecomparisonbetweenSFTandRLacrossdifferenttaskswithactionchunking.
+Both success rate and relative performance drop are reported.
+
+B.6   Extended performance comparison on opening articulated objects
+
+To move beyond simple pick-and-place and introduce richer manipulation dexterity, we design an
+openarticulatedobjectstask,andreplacetheWidowXrobotarmwithaFrankaPandaarmtoprovide
+a larger working space. The agent must grasp an object’s handle and open the door past20◦. The
+reward function is shaped as follows: a reward of0.1    is given when the handle is first grasped, an
+additional0.1    isgrantedifthegraspissustainedforfiveconsecutivesteps,andafinal1.0    isprovided
+upon successful door opening.
+During training, we introduce randomization across vision, semantics, and execution to improve
+generalization. For vision,we randomizeover16 backgroundassets (asdescribed inSec. 5.1). For
+semantics,weemploy8articulatedobjectsthatvaryinsize,name,handletype(barorboxed),and
+handle position (up, down, left, or right). For execution, we perturb the object frame with random
+translations upto±8cm      and rotationsup to±π/48     . The training andevaluation environments are
+illustrated in Fig. 14.
+We then evaluate generalization on six out-of-distribution (OOD) splits:
+
+        •Vision:5 novel background scenes,
+        •Vision:whole-scene dynamic noise with an image mixing transparency of 0.5,
+        •Semantics:4 unseen articulated objects (microwave, dishwasher, mini-fridge, oven),
+        •Semantics:16 re-phrased language instructions,
+        •Execution:translations up to12cm and rotations up to±π/24,
+        •Execution:random initial offsets on joints 0/1/2/4 of the robot arm.
+
+As shown in Tab. 4, RL continues to outperform SFT on semantic and execution splits, consistent
+with our main pick-and-place results.
+
+
+                                                          22
+
+===== PAGE 23 =====
+
+Table 3: Detailed results across different taskswith action chunking, with the best results across SFT
+and RL highlighted inbold. Standard deviations are reported in parentheses.
+                                      Acc.                           Cont. Acc.                             Suc.
+                             SFT               RL               SFT               RL               SFT               RL
+         IND             0.984(.013)0.969(.022)             0.953(.026)0.953(.022)             0.776(.029)0.891(.046)
+        Table            0.964(.007)0.948(.019)             0.953(.013)0.948(.019)             0.812(.046)0.885(.041)
+     Texture-w           0.844(.046)0.885(.015)             0.807(.032)0.870(.007)             0.547(.022)0.792(.029)
+      Texture-s          0.719(.034)0.781(.056)             0.661(.015)0.734(.046)             0.401(.019)0.578(.071)
+      Noise-w            0.932(.015)0.974(.007)             0.880(.019)0.958(.027)             0.703(.046)0.870(.053)
+       Noise-s           0.755(.039)0.839(.041)             0.724(.019)0.786(.045)             0.401(.058)0.625(.022)
+         Obj.            0.807(.007)0.901(.019)             0.740(.007)0.875(.022)             0.542(.037)0.693(.037)
+       Recep.            0.927(.027)0.932(.045)             0.885(.019)0.911(.053)             0.609(.013)0.682(.032)
+       Instruct          0.620(.007)0.641(.013)             0.604(.019)0.630(.019)             0.479(.029)0.562(.026)
+  M-Obj. (IND)           0.661(.075)0.745(.019)             0.641(.080)0.714(.032)             0.542(.059)0.641(.066)
+  M-Obj. (OOD)           0.589(.048)0.661(.019)             0.552(.041)0.620(.019)             0.365(.032)0.495(.048)
+  Disturb Recep.         0.901(.027)0.870(.029)             0.891(.022)0.849(.048)             0.599(.039)0.719(.056)
+     M-Recep.            0.891(.034)0.859(.038)             0.849(.060)0.828(.058)             0.365(.032)0.297(.056)
+      Obj. Pos.          0.807(.015)0.917(.027)             0.771(.015)0.896(.029)             0.453(.022)0.682(.045)
+    Robot Pose           0.557(.019)0.797(.034)             0.484(.034)0.734(.046)             0.281(.013)0.589(.029)
+     Obj. Rep.           0.219(.038)0.510(.015)             0.177(.041)0.453(.013)             0.068(.053)0.318(.007)
+
+
+
+
+
+
+
+
+
+
+
+
+
+                 (a)                                          (b)                                           (c)
+Figure 14:  Illustration of the open articulated objects task.  (a)-(b) Two representative training
+scenarios. (c) Set of articulated objects used in training (left two rows) and in OOD testing (the most
+right row).
+
+C   Broader impacts
+
+Our work advances the understanding and generalization capabilities of Vision-Language Action
+(VLA)modelsinembodiedAI,whichmayacceleratethedeploymentofmorerobustandadaptive
+agents in real-world environments.   Improved generalization can enhance the reliability of AI
+systemsinapplicationssuchasassistiverobotics,autonomousnavigation,andhouseholdautomation,
+potentially benefiting society by making these technologies safer and more accessible.
+However, as VLAs become more capable and generalizable, there is also a risk of unintended
+consequences, such as misuse in surveillance, privacy violations, or deployment in safety-critical
+scenarioswithout adequateoversight. Weencourage responsibleuseof ourfindingsandrecommend
+that future deployments of VLA-based systems consider safety, ethical, and privacy implications.
+
+
+
+
+
+
+
+
+
+                                                              23
+
+===== PAGE 24 =====
+
+Table 4: Performance comparison onthe openarticulated objectstask, with resultsaveraged over 3
+random seeds. Standard deviations are reported in parentheses.
+                                                     SFT                                                RL
+                                 Success Rate    Degradation Ratio                 Success Rate    Degradation Ratio
+              IND                  0.745(.015)             –                         0.724(.045)             –
+     New Backgrounds               0.766(.071)         +0.028                        0.734(.058)         +0.014
+       Dynamic Noise               0.526(.015)         -0.294                        0.448(.037)         -0.381
+.        Vision Avg.               0.646(.043)         -0.130                        0.591(.048)         -0.184
+      Articulated Obj.             0.042(.015)         -0.944                        0.151(.019)         -0.791
+      Re-phrased Inst.             0.703(.077)         -0.056                        0.620(.041)         -0.144
+       Semantic Avg.               0.373(.046)         -0.500                        0.386(.030)         -0.468
+           Obj. Pose               0.448(.032)         -0.399                        0.484(.089)         -0.331
+            EE Pose                0.151(.027)         -0.797                        0.312(.013)         -0.568
+       Execution Avg.              0.300(.030)         -0.600                        0.398(.051)         -0.450
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                24

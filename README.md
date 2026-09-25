@@ -9,9 +9,8 @@
 ```text
 Trove/
 ├── articles/                  # 已完成的文章笔记
-│   └── <article-id>/
-│       ├── index.md           # 文章笔记
-│       └── assets/            # 从原文裁剪的图表等附件
+│   ├── <paper-title>.md       # 文章笔记
+│   └── images/                # 从原文裁剪的图表等附件
 ├── sources/                   # 待整理的原文 PDF、网页导出等
 ├── templates/
 │   └── article-template.md    # 文章笔记模板
@@ -25,8 +24,8 @@ Trove/
 
 1. 将原文放入 `sources/`。
 2. 为文章选择稳定、简短的标识，例如 `attention-is-all-you-need`。
-3. 复制 [文章模板](templates/article-template.md)，保存为 `articles/<article-id>/index.md`。
-4. 按模板提取并填写内容；原文图表裁剪后放入 `articles/<article-id>/assets/`，并用相对路径引用。
+3. 复制 [文章模板](templates/article-template.md)，以论文标题保存为 `articles/<paper-title>.md`。
+4. 按模板提取并填写内容；原文图表裁剪后放入 `articles/images/`，并以文章标识作为文件名前缀，再用相对路径引用。
 5. 提交前检查来源链接、图表路径、数字、公式与引用编号，并删除未填写的占位符。
 
 ## 笔记规范
@@ -36,6 +35,33 @@ Trove/
 - 贡献、方法和实验仅整理作者明确说明的内容；作者观察与作者结论应清楚区分。
 - 未获取或原文未说明的信息应明确标记，不能推断补全。
 - 使用 Markdown 相对路径，确保笔记与附件可随仓库一起浏览。
+
+## 准备论文原文
+
+可用脚本完成下载、逐页文本提取和页面渲染等重复步骤。例如：
+
+```bash
+python3 scripts/prepare_paper.py \
+  --url https://arxiv.org/pdf/2406.09246 \
+  --article-id openvla \
+  --title "OpenVLA: An Open-Source Vision-Language-Action Model" \
+  --render-pages 1,4,7,9,10
+```
+
+脚本以论文标题命名 PDF 并保存到 `sources/`，把逐页文本、页面渲染和清单写入 `work/<article-id>/`。为跨平台兼容，文件名中的 `:`、`/` 等保留字符会替换为 `-`。页面渲染需要安装 PyMuPDF：
+
+```bash
+python3 -m pip install PyMuPDF
+```
+
+需引用原文图表时，可用 [裁剪脚本](scripts/crop_pdf_region.py) 从指定 PDF 页面导出图像。例如：
+
+```bash
+python3 scripts/crop_pdf_region.py \
+  --pdf "sources/Paper Title.pdf" --page 4 \
+  --rect 100,60,520,290 \
+  --output articles/images/<article-id>-figure-2.png
+```
 
 ## 模板
 

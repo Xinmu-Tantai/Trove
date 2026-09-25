@@ -1,0 +1,1262 @@
+
+
+===== PAGE 1 =====
+
+X-Foresight: AJointVision-ActionCausalForecasting
+              NetworkviaPredictiveWorldModeling
+
+
+
+
+                                             PWMTeam,XPengInc.
+                                       https://x-foresight-1.github.io
+
+
+                                                  Abstract
+
+          Physical world knowledge resides mainly in videos. Equipping Vision-Language-
+          Action (VLA) models with such knowledge is fundamental for safe and gener-
+          alizable planning. To extract this knowledge from video data, predictive world
+          modeling enables VLA to internalize physical dynamics and long-term causality
+          by predicting future video from past observations.  However, naive next-frame
+          predictionfacestwochallenges: 1)unlikesemanticallydistincttexttokens,video
+          tokensareinherentlylow-entropyandredundant,causingpredictiontoeasilyde-
+          generateintotrivialextrapolation. 2)worldmodelingposesatemporaldilemma:
+          instantaneous dynamics need dense frame prediction, while long-term causality
+          unfolds over long and variable-size horizons that dense prediction cannot effi-
+          ciently cover. To learn world knowledge effectively, we introduceX-Foresight,
+          a predictive world model integrated directly into the VLA architecture to jointly
+          learn world modeling and real-time action control. At its core lies long-horizon
+          chunk-wiseauto-regressivestrategy, that addressesboth challenges: By predicting
+          across semantically distant chunks rather than adjacent frames, it escapes trivial
+          extrapolation, while preserving dense intra-chunk frames to capture instantaneous
+          dynamicsandsparseinter-chunktransitionstocapturelong-termcausality,resolv-
+          ingboththeentropyand temporal-dilemmachallengesattractabletrainingcost. A
+          curriculum learning schedule is further utilized to progressively extend prediction
+          horizons and stabilize long-horizon training. To capture long-term causality effec-
+          tively,wepresenttemporalimportancesampling,whichconcentratessupervision
+          on safety-critical chunks identified by ego-motion and behavioral signals.  We
+          furtherdelegatephotorealisticsynthesistoadiffusion-basedmulti-viewrenderer,
+          enriching photorealistic details and improving pixel-level appearance. Compre-
+          hensive experiments demonstrate that X-Foresight significantly outperforms VLA
+          baselines in planning performance while maintaining strong generative fidelity,
+          establishing arobust paradigm for world-knowledge-drivenautonomous systems.
+
+
+1   Introduction
+
+Thepursuitofartificialintelligencein physical worldhasdriven significant interestinworldmodels.
+Withworldmodels,internalrepresentationsoftheenvironmentcanbelearned,whichenforcesagents’
+prediction,planning,andcontrol. Recentworldmodelsemploydiversestrategiestorepresentinternal
+dynamicsoftheworld: video-basedgenerativemodelssuchasSora[2],Genie[3],andX-World[22]
+learn to synthesize photorealistic future frames with large diffusion models; 3D-centric frameworks
+like Marble [12] explicitly model spatial geometry for physically consistent world reconstruction,
+whilelatent-basedmethodssuchasJEPA[1]bypasspixel-spacegenerationentirely,learningsemantic
+state representations through self-supervised predictive frameworks.
+Vision-Language-Action(VLA)modelshaveemergedas powerfulparadigmsforembodieddecision-
+making, unifying perception, reasoning, and control within a single auto-regressive framework.
+Foundationalworks suchas RT-2[23], PaLM-E[6], andOpenVLA [11]have demonstratedremark-
+
+===== PAGE 2 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure1: (A)InferencepipelineofX-Foresight. ThemaincontributionsresidedintheLargeDrive
+Model(LDM)andtheVisionRenderer. (B)Closed-loopinferencevisualizationofpredictedfuture
+framesatt=2s,t=4s,andt=6s;onlythefrontcamerawasshown. (C)X-Foresightoutperformedthe
+baselines across multiple benchmarks.
+
+
+able generalization by transferring web-scale vision-language knowledge to robotic manipulation.
+In the autonomous driving domain, industry systems such as XPeng’s VLA 2.0 [19] exemplify the
+adoption of VLA architectures for end-to-end perception-to-control pipelines. However, prevailing
+VLAarchitecturesremainfundamentallyreactive,lackingdeepworldunderstandingandproactive
+danger-avoidance mechanisms. This limitation stems from their inability to simulate future states
+before acting, forcing policies to rely solely on historical observations. Without forward-looking
+foresight, models struggle to anticipate collisions, navigate through complex scenarios, or exploit
+long-horizon environmental causality to improve agent control.
+Among the representations commonly used in robotics and autonomous driving, video provides one
+of themost holisticdescriptions of thesurrounding environment. Itcaptures both low-levelvisual
+details, such as color, texture, and object shape, and high-level semantic information, such as the
+motion patterns of vehicles and vulnerable road users. Moreover, the ego vehicle’s trajectory can
+often be inferred directly from dash-camera observations. Therefore, we argue that video serves as a
+primary carrier of physical-world knowledge, encoding rich spatial, temporal, and semantic cues that
+are essential for future prediction and decision-making. We thus introduce X-Foresight, a predictive
+worldmodelbuiltatoptheVLAarchitecturethatseamlesslyintegratesmulti-viewfutureprediction
+withclosed-loopactioncontrol. Byactivelyforecastingfuturecameraimages,themodeldevelopsan
+internalizedunderstandingoflong-horizonenvironmentalcausality,enablingproactive,safety-critical
+decision-making while preserving the real-time responsiveness required for autonomous systems.
+Inspired by the success of large language models, future-token prediction has become a central
+paradigmforgenerativesequencemodeling. However,directlytransferringthis paradigmtovideo-
+based world modeling introduces an important modality gap. Language tokens are semantically
+discrete, relatively sparse, and high-entropy, whereas video tokens are often redundant, with high
+frame-to-frame similarity. This difference can easily lead to degenerate future rollouts, where the
+model learns only trivial frame-level extrapolation rather than meaningful physical dynamics. A
+further temporal challenge in world modeling arises from the mismatch between instantaneous
+dynamics and world transitions: effective world representation learning must capture short-term
+dynamicsandlong-termcausalitysimultaneously. Instantaneousdynamicsrelyprimarilyonshort-
+termdensevisualevidence,whereasworldtransitionsdemandlong-horizoncausalreasoningover
+extendedtemporal contexts. Toreconcilethis discrepancy,X-Foresight employsachunk-wise auto-
+regressiverolloutthatjointlyforecastsfuturevisionandactiontokens. Theproposedlong-horizon
+chunk-wiseauto-regressivestrategynotonlyavoidstrivialextrapolationbypreservingdenseintra-
+chunk frames that capture instantaneous dynamics, but also enables efficient training and low-latency
+inference.
+Wefurtherimproveworld-knowledgelearningthroughtargetedtraininginnovations. Sincepredictive
+capability develops progressively, we adopt a curriculum learning schedule in which the model first
+learnstoforecastshorthorizonswithineachchunkandisthengraduallyexposedtolongerprediction
+horizons. Thisprogressivetraining strategyimproves thestabilityoflong-horizonforecastingand
+
+
+                                                          2
+
+===== PAGE 3 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+enhances the robustness of the learned policy.  Additionally, because temporal segments do not
+contributeequallytoworldmodeling,weintroduceahybridsamplingstrategythatcombinesrandom
+frame selection with importance-weighted sampling.  This approach encourages broad temporal
+coveragewhileemphasizingsafety-criticaltransitions,therebyimprovingthemodel’sabilitytolearn
+informative world knowledge relevant to long-term causality and decision-making. We argue that
+world representations should remain highly abstract; excessive visual detail at the latent level dilutes
+the model’s capacity for structural world understanding. To reconcile abstraction with perceptual
+fidelity, we delegate photorealistic synthesis to a dedicated diffusion module. This enables high-
+fidelity multi-view rendering, wherea diffusion-basedrenderer reconstructsdetailed surround-view
+cameras within the auto-regressive loop, providing dense latent-space supervision.
+In summary, the key contributions of this work are:
+
+        • We introduce along-horizon chunk-wise auto-regressivestrategythat leveragesextended
+          future horizons for world modeling.  This design both mitigates the collapse of world-
+          knowledgelearningundernaivenext-framepredictionandresolvesthetemporaldilemma:
+          denseintra-chunkframesallowthemodeltocaptureinstantaneousdynamics,whilelong-
+          horizon chunk-level prediction promotes the learning of broader world causality.
+        • Toimprovelong-horizon forecastingstabilityandenhance policyrobustness,we exploita
+          curriculum-basedlearningstrategy,startingwithshort-horizonpredictionacrosschunksand
+          gradually extending to longer strides.
+        • Weadopttemporalimportancesampling,ahybridsamplingmechanismthataccountsfor
+          uneven contributions of future frames to world knowledge learning, combining random
+          selection with importance-weighted focus on critical temporal transitions.
+        • The proposed method can acquire high-fidelity multi-view future images. Integration of
+          a diffusion-based renderer into the auto-regressive pipeline is developed to reconstruct
+          photorealistic surround-view details.
+
+Comprehensive experiments demonstrate that X-Foresight significantly outperforms the reactive
+VLAbaselineinplanningsafety,generativefidelityasshowninFig1,establishingarobustparadigm
+for world-knowledge-driven autonomous systems.
+
+2   Data
+
+2.1   Datascale/resolution
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 2: Overview of thelarge-scale multi-camera driving dataset. Thedataset contained approxi-
+mately280,000hoursof driving data, segmented into34Mclips. Multi-view images fromseven
+cameras(front fisheye, front narrow, left/right front, left/right rear, and rear) were processed and
+tokenized into13.8Ttokens, which were used for training the world model.
+
+Webuiltanindustry-leveldatasetwithapproximately280,000hoursofin-housedrivingdata,spanning
+varioustrafficconditionsandenvironmentalscenarios,asillustratedinFig2. Intotal,thedatawas
+
+
+                                                          3
+
+===== PAGE 4 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 3: Training scenario distribution of X-Foresight. Fine-grained auto-tags were grouped into
+eightscenario categories. Barlengthdenotedthe totalshareofthe category,colors splittheshareby
+road class(urban / highway), andnumbers in parentheses denotedthe number of fine-grainedlabels
+assigned to each category.
+
+
+segmented into 34M clips of up to 30 seconds eachand tokenized into 13.8T tokens from multi-view
+observations. All camera streams were stored at a native frequency of 12 Hz and downsampled to
+4Hzfortraining. Thissetupprovidedsufficienttemporalcontextforlong-horizonworldmodeling
+while maintaining a tractable sequence length for efficient training.
+Thedatasetcontainedtwonativeresolutionconfigurations. Tobalancecomputationalefficiencyand
+spatial fidelity, images from different cameras were resized to viewpoint-specific resolutions to better
+preserve spatial characteristics. This temporal configuration provided a favorable trade-off between
+motionfidelityandcomputationalcost,allowingthemodeltocapturefine-graineddynamicswhile
+keeping sequence lengths tractable for training.
+Data was collected using a 7-camera surround-view system that provides full 360-degree coverage.
+Thesetupconsistedofonefront-facingfisheyecameraforwidefield-of-viewperception,onefront-
+facing narrowcamera for long-rangeobservation, four side cameras for cross-traffic awareness, and
+one rear camera. The camera layout and mounting configuration were consistent with X-World [22].
+All cameras weregeometrically calibrated with respect to theego vehicle frame. Thismulti-camera
+configuration enabled consistent multi-view observations and reduced occlusions, which was critical
+for learning a spatially coherent and temporally consistent world model.
+
+2.2   Distribution
+
+Following the auto-tagging and distribution-analysis protocol of X-World [22], we analyzed the
+scenario distribution of the X-Foresight training set from auto-tagged driving clips. The original
+tags covered nearly 200 fine-grained scenarios, including road type, ego maneuver, road layout,
+surrounding traffic, and long-tailsafety cases. Here,we aggregatedthese fine-grainedtags intoeight
+scenariocategoriesaccording tothe maindrivingcontext ofeach tag. Thisgrouping preserved the
+main driving regimes in the dataset while retaining explicit categories for interaction-heavy and
+long-tail scenarios.
+Fig3showed the aggregated distribution. Routine driving still took the largest share: open-road
+lanekeeping accounted for21.0%ofthedata andlanechangesaccountedfor 20.1%. Constrained-
+lane driving, such as line straddling and unmarked roads, made up 16.0%, while intersections and
+turnscontributed13.1%. Therest ofthedatacoveredinteraction andlong-tailscenarios,including
+obstaclesand cut-ins (9.9%),following andcongestion(9.6%), VRUinteractions (6.2%),andrare
+road layouts such as ramps, toll stations, roundabouts, auxiliary roads, and high-curvature segments
+(4.1%). Together,commondrivingandmaneuveringcasesaccountedforabout70%ofthetraining
+
+
+                                                          4
+
+===== PAGE 5 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 4: The training pipelines of the proposed X-Foresight. X-Foresight consisted of two main
+components,aLargeDriveModel(LDM)thatperformedjointworldpredictionandactionplanning
+in a unified token space, and a Vision Renderer that decoded the LDM’s predicted camera tokens
+into photorealistic multi-view frames. In stage Iand stage II, the LDM and the Vision Renderer were
+trainedseparately,withtherenderer conditioned onground-truthfuturetrajectories;instageIII,the
+LDMwas frozenandthe renderer’sconditioningwas swapped totheLDM’s predictedfuture camera
+tokens.
+
+
+data,whiletheremainingportionprovidedcoverageformorechallengingagentinteractionsandroad
+structures.
+The road-class split further showed that the dataset was dominated by urban driving (86.8%), with
+highway clips accounting for 13.2%.  This mix reflected the operating regimes most frequently
+encountered in large-scale public-road driving, while still preserving explicit coverage of safety-
+critical and long-tail scenarios such as VRU interactions, cut-ins, ramps, and toll stations.  The
+resultingdistributionprovidedbroadsupervisionforworld-modellearningandsupportedscenario-
+aware evaluation of X-Foresight across both common driving patterns and challenging edge cases.
+
+3   Methodology
+
+This section presented the methods employed in X-Foresight. X-Foresight consisted of two main
+components: a Large DriveModel (LDM) that performed joint world prediction and action planning
+inaunifiedtokenspace,andaVisionRendererthatdecodedtheLDM’spredictedcameratokensinto
+photorealistic multi-view frames as shown in Fig4. The LDM was an auto-regressive transformer
+that consumed a temporal stream of multi-view camera observations, language instructions, ego-
+vehicle state, and predicted threekinds of future targets at every step: ego actions usedfor real-time
+control, a bird’s-eye-view (BEV) plot that captured the surrounding spatial structure, and per-camera
+latent tokens that summarized the predicted future appearance from each viewpoint. The Vision
+Rendererwas adiffusion-baseddecoder whoserendered frameswerefed backinto theLDMas fresh
+observations,closingtheauto-regressivepredictionloop. Wefurtherdescribedthetrainingstrategy
+and the inference pipeline of the proposed X-Foresight.
+
+3.1   LargeDriveModel
+
+3.1.1   DesignRationale
+
+To enableworldunderstanding inX-Foresight, Large DriveModel (LDM)was explicitly trainedto
+predictfutureimages,bird’s-eye-view(BEV)representations,andactions. Weadoptedalong-horizon
+chunk-wise auto-regressive strategy to perform future rollouts over extended horizons.  Training
+onlong-horizondataallowedthemodeltocaptureworldtransitioncausalitywhileimprovingdata
+utilization. Further details were provided in Section3.1.3.
+
+
+                                                         5
+
+===== PAGE 6 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+The chunk-wise design addressed an inherent temporal dilemma: instantaneous dynamics required
+densely sampled short-range frames, whereas long-term causality unfolded over variable-length
+horizons. Chunk-wisefuturerolloutservedasthekeymechanismtoreconcilethesetworequirements.
+InspiredbythesuccessofautoregressivemodelinginLLMsandVLMs,weadoptedanautoregressive
+formulation that further enabled extensible future rollout generation.
+The long-horizon chunk-wise auto-regressive strategy within LDM also facilitated rapid deployment.
+Since world knowledge was encoded during training, LDM at inference time was capable of both
+producing high-frequency instantaneous control signals and generating long-horizon rollouts with
+high-fidelity multi-view image synthesis, with the support of Vision Renderer.
+
+3.1.2   Multi-modalPromptDesign
+ThecorecomponentoftheX-ForesightframeworkwastheLDMtrainedtopredictfutureegoactions
+and future observations simultaneously. As illustrated in Fig4, we formulated this problem as a
+multi-modal prompting task:
+             [SYSTEM  PROMPT]|[l                   0,O0,A0,Q0]|[l   1,O1,A1,Q1]|...|[l     i,Oi,Ai,Qi].
+Thepromptconsistedofaglobalsystempromptfollowedbyasequenceoftemporalchunks. The
+system prompt provided general task instructions and high-level context about the ego vehicle,
+includingits long-horizon navigation objective. Eachtemporalchunk containedfourtypesof tokens.
+Thetexttokensli specifiedthepredictionhorizonortemporalwindow. TheobservationtokensOi
+represented multi-camera video tokens extracted from multiple frames within the chunk using a
+ViT[5]encoder. Theaction/statetokens   Ai encodedtheego-vehiclestates,whichcanbederivedfrom
+historical trajectories. Thequery tokensQi were usedto trigger the predictionof future variables. To
+reducetheoveralltokenbudget,videotokenswerepredictedinplaceratherthanthroughadditional
+visual query tokens.
+
+3.1.3   ExtensiontoLongerHorizon
+While ourprompt designcould naturally extend to longerhorizons, directly increasingthe prediction
+duration was computationally prohibitive:  both memory footprint and computational cost grew
+quadratically withsequence length. In this section, weintroduced several keydesigns which notonly
+improved model performances, but also optimized LDM training on longer horizon.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 5:Prompt formulations for future frame prediction. (a) Frame-wise foresight one frame at each step.
+(b)Frame-wiselongerforesightincreasedthetemporalstrides. (c)Chunk-wiseforesightpredictedachunkof
+K consecutive frames in parallel. (d) Chunk-wise longer foresight combined chunk lengthK with strides for
+longer-horizon prediction. (e) Chunk-wise temporal importance sampling.
+
+Chunk-WisePredictionIn Large Drive Model (LDM), we adopted a chunk-wise formulation in
+which the prompts were segmented into short, fixed-length units (typically of 1 second duration)
+
+
+                                                          6
+
+===== PAGE 7 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+thatwerepredictedbythemodelinanauto-regressivemanner. Thisdesignwasmotivatedbyboth
+modelingconsiderationsandcomputationalefficiency. AsillustratedinFig5(a),frame-wiseforesight
+providedonlyaweaklearningsignalateachstep,sinceadjacentcameraframestypicallydiffered
+only marginally over short time intervals. A simple alternative (Fig5(b)) was to downsample the
+framesequenceandperformframe-wiselongerforesightatacoarsertemporalresolution. However,
+this could degrade performance because trajectory prediction relied on temporally coherent motion
+cues, whichmight belost oraliased underaggressivetemporal downsampling. Incontrast, chunk-
+wise foresight, shown in Fig5(c), preserved short-term temporal structure within each chunk while
+requiring the model to predict a longer segment of future evolution at each auto-regressive step.
+
+CurriculumLearningwithExtendedForesightTofurtherimprovelong-horizonprediction,we
+adoptedashort-to-longcurriculumlearningstrategy. Trainingstartedwithshort-horizonsequences
+inwhichadjacentchunksweretemporallycontiguousandseparatedby1second. Wethenextended
+theeffectivepredictionhorizonbyincreasingthetemporalstridebetweenneighboringchunksto3
+seconds,which wascalledChunk-wise longerforesightasshowninFig5(d). Thislarger temporal
+gap between chunks extended the prediction horizon while it did not increase the computational
+budgets.
+Underthistemporallystridedsetting,theobservationtargetswerepredictedacrosstheextendedtime
+gapsbetweenchunks. Incontrast,actionpredictionremainedattheimmediatenextcontrolstep,since
+closed-loopcontrolrequiredtemporallydense,unstridedtrajectoryoutputs. Thisasymmetricdesign
+allowedthemodeltolearnlong-horizonvisualevolutionwhilepreservingthetemporalresolution
+required for ego-action prediction.
+
+TemporalImportanceSamplingChunk-wise longer foresight let LDM train on long horizons
+at tractable cost. A uniform sampler, however, wasted most of the budget on near-cruise segments
+and under-supervised the rare events that drove safety-critical decisions. We replaced it with an
+importance-weighted sampler as in Fig5(e).
+Foreachcandidatestepk,wecomputedanimportancescorewk basedonthelongitudinalandlateral
+accelerations of the ego trajectory, denoted byax anday, respectively. To capture safety-relevant
+dynamicsatdifferenttemporalscales,weevaluatedthetrajectoryoverthreetemporalwindowsaround
+the candidate step, denoted asWk1,Wk2, andWk3. Within each window, we took the maximum value
+of a weighted acceleration magnitude, and then summed the resulting scores across windows:
+
+                          wk  =       X                maxt∈W    (λ x|a x(t)|+λ         y|a y(t)|).                              (1)
+                                   W∈{W         k1,Wk2,Wk3}
+whereλx≥0    andλy≥0    controlled the relative importance of longitudinal and lateral accelerations.
+Thethreetemporalwindowsweredesignedtocapturecomplementarymaneuverphases. Thenear-
+future windowWk1  emphasized imminent events such as braking, acceleration, or sudden swerve
+onsets. The mid-horizonwindowWk2 captured upcomingmaneuvercommitments, including turn-in
+andbrake-inbehavior. Therecent-historywindowWk3 capturedtheaftermathofmaneuversthathad
+just beenexecuted. Together, these windows assigned higher sampling probabilityto steps that were
+temporally close to safety-relevant trajectory changes.
+Giventheper-stepimportancescores{w  k},wesampledcandidatestepsaccordingtoatemperature-
+scaled distribution:
+                                               pk  =     w1/τPk    ,                                                           (2)
+
+                                                           jw1/τj
+whereτ >0    controlled the sharpness ofthe distribution. In practice, we additionally constrainedthe
+maximumtemporalgapbetweenconsecutiveselectedsteps. Thispreventedthesampledsequence
+frombecomingoverlysparseandensuredthatfuturepredictionremainedwell-conditionedonrecent
+temporal context.
+
+Semi-Causal Block Sparse AttentionTo further speed up efficient long-horizon training, we
+adopted a semi-causal block-sparse attention mask implemented using block sparse attention [8],
+inspiredbythesparseattentionpatternsin[13]. Thetokensequencewasfirstpaddedandpartitioned
+into fixed-size blocks, and sparsity was imposed at the block level.
+
+
+                                                         7
+
+===== PAGE 8 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 6:Semi-causal block-sparse attention mask forlong-sequence training. Each colored pixel denoted one
+token block, where attention was allowed. The mask preserved bidirectional attention within each temporal
+chunk,allowedaccesstotheglobalsystempromptandpreviousprompttokens,andprohibitedattentionbetween
+query tokens across different chunks.  The two panels showed complementary sparse patterns assigned to
+different attention-head groups.
+
+
+As illustrated in Fig6, the attention mask was designed to preserve the temporal structure of the
+prediction taskwhile reducing unnecessary long-range interactions. The system prompt wastreated
+as a set of global sink tokens and was visible to all subsequent temporal chunks. Within each chunk,
+token blocks were connected with fully bidirectional self-attention, allowing the model to jointly
+reason over the text, observation, action/state, and query tokens associated with the same temporal
+window.
+A temporally causal design was employed for interactions across different chunks. Because every
+chunk shared an identical internal layout, each prompt-side token, including li, Oi and Ai, had
+a positional counterpart in every earlier chunk; cross-chunk attention was defined with respect to
+this counterpart, covering the same position and a surrounding spatial neighborhood whose width
+shrankwithtemporaldistance;thisdesignallowedbothtemporaltrackingandspatialreasoningwhile
+keepingtotalcomputemanageable. QuerytokensQi retainedfullaccesstoallprecedingprompt-side
+tokens, enabling future predictions to condition on the available observation and action history.
+However,attentionfromQi topreviousquerytokensQ1:i−1       wasmaskedtopreventpredictionsfrom
+directly depending on earlier predicted targets.
+To further reduce computation, we partitioned attention heads into two disjoint groups based on
+the parity of the timestep difference between query and key blocks.  Each group attended to a
+complementarysubsetoftemporaloffsets,whichreducedthenumber ofactiveblockconnections
+while maintaining coverage over the temporal context. As a result, the number of attended blocks
+grew approximately linearly with sequence length, rather than quadratically.
+
+3.1.4   TrainingObjectives
+
+During training, we optimized the model to predict future observations and ego actions under a
+teacher-forcingformulation. Specifically,ground-truthobservationsandactionswereencodedand
+inserted into the multi-modal prompt for previous temporal chunks, while the model was trained
+to predict the targets at future prediction steps. The training loss was applied to both the predicted
+observation tokens ˆovi and the decoded ego actions ˆai.
+
+
+
+                                                        HX   VX
+                                     Lcam =   1HV                ∥ˆovi −g(I      vi)∥ 2,                                           (3)
+                                                       i=1  v=1
+
+                                                            8
+
+===== PAGE 9 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+                                                           HX
+                                            Lact =  1H         ∥ˆai−a   i∥1.                                                    (4)
+                                                          i=1
+whereH was the total horizon used in training,V was the number of camera views. g(·)     was the
+frozen ViT from the base vision language model.
+Weadditionallyincorporatedanauxiliarybird’s-eye-view(BEV)predictionlossduringtrainingto
+encourage themodel to learngeometrically meaningfulscene representations. The predictedBEV
+map ˆbi was decoded from a subset of the query tokens inQi and supervised by the corresponding
+ground-truth BEV targetb     i:
+                                                           HXˆbi−b   i2.                                                   (5)
+                                           Lbev =  1H
+                                                          i=1
+The final training objective was a weighted sum of the action, camera, and BEV losses:
+                                        Ltotal =L   act+αL   cam+βL   bev,                                              (6)
+whereα andβ controlled the relative weights of the visual prediction and BEV prediction losses,
+respectively.
+
+3.2   VisionRenderer
+
+The Vision Renderer was theterminal module ofX-Foresight’s auto-regressive pipeline: itconverted
+theLDM’spredictedcameralatenttokensintohigh-fidelitymulti-viewfutureframesthatcouldbe
+fed back intothe vision encoder to closethe inference loop. Camera latent tokens were optimized for
+auto-regressivereasoningandthereforecompressedawaymuchofthehigh-frequencyappearance
+detail required for photorealistic closed-loop feedback; decoding them directly in the vision decoder
+wouldaccumulatereconstructionerroroverlongrolloutsanddegradedownstreamperception. Unlike
+prior generative world models that coupled action-conditioned dynamics with pixel synthesis in a
+singlenetwork,weintentionallyseparatedthetworoles—imaginationandcontrollivedintheLDM,
+whiletherendereractedasaconditionalrefinerthat,conditionedonashortwindowofhistoryimages
+andtheLDM-predictedcameratokens,restoredthehigh-frequencyvisualdetaillostduringlatent
+compression.
+
+3.2.1   DesignRationale
+AcentraldesigndecisionwasthattherendererwasnotconditionedontheLDM’sactiontokens. The
+camera tokens alreadyencoded the ego-vehicle transformationimplicitly, together with surrounding
+scene geometry and dynamic agents; in our setting we found that the camera token was the only
+LDM-produced conditioning signal required, with multi-view history continuing to enter through
+the standard I2V pathway and no additional action conditioning needed. We adopted this restriction
+to avoid the risk that, if both signals were exposed, the renderer might exploit action tokens as a
+low-entropy shortcut and ignore the camera tokens, causing the LDM and renderer to predict futures
+independentlyand defeatingthepurpose ofthe closedloop. As aconsistencycheck, wecompared
+the renderer’s frames against the pixel-space decode of the same camera tokens produced by the
+Camera Latent Decoder (Section4.1.3); theiragreement was consistent with thecamera token acting
+as the effective information bottleneck through which the LDM controlled the rendered future.
+
+3.2.2   ModelArchitecture
+BackboneThe Vision Renderer was built upon X-World, a Diffusion Transformer (DiT) [15]
+video generator that coupled a 3D causal VAE with a latent denoiser trained under a rectified-flow
+objective [14]. Theencoder anddecoder were basedon the3D causal VAE fromthe WAN2.2 release
+of WAN [18], which compressed input videos along both spatial and temporal dimensions into a
+compact latent space for efficient denoising. Rectified flow learned a time-dependent velocity field
+vθ(y t,t,c)that mapped a Gaussian prior to the data distribution along a straight interpolation path
+               yt = (1−t)y          0+ty     1,  y 0∼p   data(y|c),y           1∼N(0,I), t∼U(0,1),              (7)
+by minimizing                                            h                                   i
+                          Lvelocity(θ) =E       y0,y 1,t,c∥v  θ(y t,t,c)−(y            1−y   0)∥ 22,                            (8)
+
+
+                                                            9
+
+===== PAGE 10 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+where c denoted the conditioning inputs passed to the renderer.  Relative to standard denoising
+diffusion,rectifiedflowyieldedstraighterprobabilitypaths,enablinghigh-qualitysampleswithfewer
+function evaluations.
+
+Cross-viewAttentionToenforcegeometricconsistencyacrosssynchronizedsurround-viewcam-
+eras, we adopted the view-temporal self-attention design of X-World: self-attention was applied
+alternately along the temporal andcross-view axes over latent tokens from multiple cameras, encour-
+agingcoherentgeometry, object identity,andmotionacrossviewpointswhilepreservingtemporal
+smoothness.
+
+ConditioningThe renderer departed from X-World in what it conditioned on. X-World was a
+full generative simulator and therefore accepted vectorized conditions describing dynamic agents
+(bounding boxes, categories) and static road elements (lane lines, boundaries) alongside text prompts,
+actions, and camera parameters. In X-Foresight, these scene descriptors were already encoded by the
+LDM into the camera token stream: the tokens carried both the ego-vehicle pose and the predicted
+placementandbehaviorofsurroundingagents. Consequently,initsfinalconfigurationtherenderer
+retainedonlyasinglecross-attentionbranchthatinjectedtheLDM’scameratokensateachDiTblock,
+withX-World’saction,dynamic-agent,static-element,andtext-conditioningbranchesallremoved.
+Theaction-conditioningbranchwasretainedtemporarilyduringfine-tuningsothattherenderercould
+beadaptedunder ground-truthego actionsbeforebeingsplicedonto theLDM’scamera-tokenstream
+(Section4.2.1). Multi-viewhistoryframeswereprovidedthroughthestandardimage-to-video(I2V)
+input pathway of WAN.
+
+TemporalAlignmentMost pre-trained video generation models operated at 12 Hz, whereas X-
+Foresight’s LDM emitted one camera token per rendered frame at 4 Hz, matching the output rate
+of the action policy head. We adapted the renderer to 4 Hz during fine-tuning (Section4.2.1) so
+that each rendered frame was tightly anchored one-to-one to a corresponding LDM camera-token
+prediction.
+
+Rollout Drift MitigationUnder closed-loop deployment, each rendered frame became part of
+the conditioning history for the next step, exposing the renderer to its own samples rather than
+ground-truth frames.  This distributional gap accumulated over the rollout and caused predicted
+frames to drift off the data manifold. Recent works such as CausVid [20] and Self-Forcing [10]
+addressed this via distribution matching distillation (DMD). For X-Foresight, we instead adopted
+two lighter-weight modifications: a latent sink that anchored a stable reference context across rollout
+steps,andlatentaugmentationonthecurrent-steplatentduringtraining,followingHelios[21],which
+exposed the renderer to perturbed conditioning resembling its inference-time distribution.
+
+3.3   Pipeline
+
+3.3.1   Training
+X-Foresight coupled a Large Drive Model (LDM), which jointly modeled actions and high-level
+visual semantics, with a diffusion-based vision renderer that produced photorealistic multi-view
+frames. Training proceeded in three stages. In stage I, the LDM was trained alone under teacher
+forcing to emit future actions together with compact camera tokens that summarized the mean of
+plausiblefutureappearances. InstageII,thevisionrendererwasindependentlyadaptedtosynthesize
+photorealisticmulti-viewimageryconditionedonground-truthfutureegoactions. InstageIII,the
+LDM wasfrozenand only the renderer was further fine-tuned, with its action-conditioning branch
+swappedfortheLDM’spredictedfuturecameratokens,sothattherendererlearnedtoproduceframes
+consistentwiththetokendistributionitwouldactuallyconsumeundertheclosed-loopauto-regressive
+rollout used at inference. This decoupled-then-aligned schedule kept LDM and renderer training
+tractable in stages I and II while letting stage III close the gap between training-time teacher forcing
+and inference-time rollout, without disturbing the LDM’s learned action and semantic predictions.
+
+StageI:LDMPretrainingWe trained the Large Drive Model (LDM) under teacher forcing to
+jointly predict future ego actions, multi-view camera tokens, and an auxiliary BEV latent, using
+the chunk-wise multi-modal prompt and the combined loss Ltotal  =L   act +αL   cam +βL   bev.
+Three components made this stage tractable on long horizons: a semi-causal block-sparse attention
+
+
+                                                         10
+
+===== PAGE 11 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+mask, with heads partitioned by parity so block density grew linearly with sequence length; a
+short-to-longcurriculum thatprogressivelyincreased theinter-chunkstride from1s to3s, shifting
+supervision from near-frame extrapolation toward longer-horizon dynamics; and an importance-
+weighted temporal sampler that scored candidate AR steps by peak weighted longitudinal/lateral
+acceleration, concentrating supervision on safety-critical futures. Because each predicted camera
+token was regressed against many plausible futures under an L2 objective, it converged to a low
+entropysummaryoftheconditionalfuture—enoughforactiongroundingandscenestructure,but
+visually blurry when decoded directly.
+
+
+StageII:RendererPretrainingInparallel,therendererwasadaptedtosynthesizephotorealistic
+multi-viewframes conditionedon ground-truthegoactions, ratherthan oncameratokens predicted
+by the LDM. We initialized from X-World, a DiT video generator that already provided cross-
+view temporal attention, and adapted it in two steps.(i) Temporal alignment.We fine-tuned the
+rendererfromWAN’snative12HztotheLDM’s4Hzemissionrate,soeachgeneratedframewas
+anchored one-to-one to a single LDM-predicted token instage III.(ii) Rollout-drift mitigation.We
+attached alatent sinkthat anchoreda stablereference contextacross rolloutsteps, and appliedlatent
+augmentationtothecurrent-steplatentduringtrainingsotherenderersawperturbedconditioning
+resembling its inference-time distribution.
+
+
+StageIII:RendererAlignmentInthe third stage,the LDM was frozenand the vision renderer
+was further finetuned so that rendered frames stayed consistent with the camera tokens the LDM
+actually producedunder the closed-looprollout used at inference. The renderer now conditioned on
+camera tokenspredictedby the LDM rather than ground-truth actions, and was supervised solely
+by the rectified-flow velocity-matching objectiveLvelocity in Eq. (8). The stage-I action and BEV
+lossesontheLDMweredropped: theLDMnolongerreceivedgradients,andspatialstructurewas
+anchored through the renderer’s pixel-space supervision. Finetuning at the 4 Hz cadence established
+in stageII closed thetrain/inference gapleft by teacherforcing and yieldedthe tightly interleaved
+prediction-rendering loop deployed at inference time.
+
+
+3.3.2   Inference
+
+Atinferencetime,X-Foresightperformedanauto-regressiverolloutthatstrictlyinterleavedprediction
+and rendering at the 4 Hz cadence established in stage III. Each step began with a text prompt and
+a short window of multi-view history frames.  The LDM consumed this context using the same
+chunk-wisepromptformat asintrainingand emitted,ina single forwardpass, the nextegoaction
+andonesecondofmulti-viewlatenttokens—fourframespercameraat4Hz,allsevencameraviews
+per frame, each camera-frame represented by several tokens — summarizing the predicted future
+appearance from each viewpoint. Decoding the camera token directly through the Camera Latent
+Decoderyieldedablurryimage,becausethetokenrepresentedthemeanofplausiblefuturesrather
+than any specific realization. The vision renderer then conditioned on this token together with the
+multi-viewhistoryandranasmallnumberofrectified-flowsamplingstepstodrawoneconcretefuture
+fromtheimplieddistribution,producinghigh-fidelity,view-consistentsurroundimagery. Because
+therendererwasconditionedonlyonthecameratoken—notonthepredictedaction—therendered
+future was fully determined by the LDM’s latent imagination, which also let us audit alignment by
+comparingtherenderer’sframesagainsttheCameraLatentDecoder’sdecodeofthesametoken. The
+rendered frames and the new action were appended to the rolling context and fed back into the LDM
+forthenextstep. Iteratingthisloopproducedarbitrarilylongclosed-looprolloutsofpairedaction
+trajectories and photorealistic surround-view video.
+
+
+4   Experiments
+
+
+ThissectionpresentedtheimplementationdetailsofbothLDMandVisionRenderer. Comprehensive
+experiments and ablation studies were conducted on our in-house dataset.
+
+
+                                                        11
+
+===== PAGE 12 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+4.1   LargeDriveModel
+
+4.1.1   TrajectoryResults
+This section evaluated X-Foresight along three axes. We first examined the effect of training with
+longerchunk-wisehorizons. Wethenablatedthreerefinementsoflong-horizontraining: curriculum
+learning(CL),curriculumlearningwithextendedforesight(CLEF)andtemporalimportancesampling
+(TIS).Finally, wereportedthecombined systematproductionscale, bothquantitatively andthrough
+two qualitative scenarios.
+Wereportedtwocomplementarysetsofmetrics. ADEandFDE(inmeters)measuredthedisplacement
+between predicted and ground-truth ego trajectories.  The CCES suite measured driving quality
+across four axes:Compliance(traffic-rule adherence, e.g., lane centering, line crossings, red-light
+running),Comfort(ride quality, e.g., steering instability, motion sickness),Efficiency(progress
+toward destination, e.g., under-acceleration, failure to overtake slow vehicles), andSafety(avoidance
+of dangerous events, e.g., collisions, time-to-collision violations, hitting road boundaries). Each
+underlyingmetricwas aper-framefail-rateproportion. Toputmetrics ofverydifferentmagnitudes
+on a common scale, we took the first row of Table1as the shared reference and reported every
+other entryacross all threetables as itsratio to thatreference; each CCES categorycell wasthen the
+unweighted mean of these ratios across the curated metrics in that category, and Total was the sum of
+the four category means. By construction the reference row therefore had1 in every category cell
+and4 in the Totalcolumn, and lower wasbetter everywhere. Collision rate wasadditionally reported
+as a standalone safety headline in its raw percentage fail-rate form. To ensure a fair comparison,
+all models were evaluated using only a single forward step at inference time, isolating the effect of
+training-time supervision on single-step inference quality.
+
+EffectofLong-HorizonTraining.   Table1evaluatedtheeffectofscalingthetraining-timehorizon
+H∈{1,6,21}               ,whereeachsteppredictedonechunkofonesecond. Thiscoverednolong-horizon
+supervision (H=1   , single-chunk training), a moderate horizon (H=6   ), and our full long-horizon
+configuration(H=21   ). Allthreerowssharedarchitecture,data,hardware(128GPUs),andnumberof
+trainingsteps;onlyH varied. ADE,FDE,andthestandalonecollisionrateallimprovedmonotonically
+with H, dropping by roughly 2–7% from H=1    to H=21   .  The Safety (1.0000→0.9481                  ) and
+Compliance(1.0000→0.9533)categories,theaxesmostdirectlyalignedwithlong-horizonworld-
+causalitysupervision, alsoimprovedmonotonically. ComfortandEfficiencysaw smallregressions
+at H=21   , revealing the optimization difficulty of naively scaling H; these partially offset the
+Safety/CompliancegainsinthesummedTotal,whichdippedfrom4.0000    atH=1    to3.9396    atH=6
+but regressed marginally to3.9524    atH=21   . The overall direction confirmed our central claim that
+long-horizon chunk-wise supervision benefited the safety- and compliance-related axes, and the
+smallTotalregressionatH=21    motivatedthecurriculum-learningandimportance-samplingdesigns
+ablated next.
+
+Table 1: Effect of training-time horizon H. All models shared architecture, data, hardware (128
+GPUs), and number of training steps; onlyH varied. ADE/FDE in meters; Coll. is the percentage
+collision fail rate (%); Compl., Comfort, Eff., and Safety are each the unweighted mean of per-
+metric ratios toH=1    (lower= better); Total sums the four category means and equals 4 atH=1    by
+construction. Lower is better throughout.
+     Method        ADE↓              FDE↓           Coll.↓    Compl.↓Comfort↓ Eff.↓ Safety↓                Total↓
+                 Lat.     Long.     Lat.     Long.
+     H=1       0.1923  1.2409  0.4881  3.1935        0.263     1.0000       1.0000     1.0000   1.0000     4.0000
+     H=6       0.1864  1.2196  0.4691  3.1178        0.262     0.9756       0.9880     0.9833   0.9927     3.9396
+     H=21      0.1810  1.2110  0.4571  3.0988        0.245     0.9533       1.0416     1.0094   0.9481     3.9524
+
+
+AblatingCL,CLEFandTIS.Table2ablatedhowthe              H=21    horizonshouldbesupervised. All
+four rows were initializedfrom theH=6    checkpoint andadditionally trained on128 GPUs; only the
+second-stage strategy differed. Row 1 (Cont.H=6   ) continued training atH=6   . Row 2 (+H=21      ,
+CL) applied basic curriculum learning (short-to-long H schedule at fixed 1s inter-chunk stride).
+Row 3 (+H=21      , CLEF) applied our curriculum learning with extended foresight, progressively
+wideningtheinter-chunkstridefrom1sto3s. Row4(+H=21      ,TIS)addedourtemporalimportance
+
+
+                                                          12
+
+===== PAGE 13 =====
+
+       PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+sampling on top of CLEF, concentrating supervision on safety-critical chunks identified by peak
+weighted lateral/longitudinal acceleration. ContinuingH=6    (Row 1) reduced ADE/FDE relative
+to theH=6    checkpoint while collision rate plateaued (0.262→0.270                ), but did not match Rows 3
+and 4, ruling out additional training time as the sole explanation.  Row 2 (CL) further reduced
+collision rate (0.270→0.238                ) and Total CCES (3.9523→3.8745                  ).  CLEF (Row 3) delivered
+the strongest ADE/FDE gains (lowest lateral ADE/FDE), indicating that progressively extending
+the foresight horizon stabilized trajectory prediction, though Safety regressed slightly versus CL
+(0.9310→0.9387                  ),motivatingthesafety-targetedsampler inRow4. TIS(Row 4)furtherreduced
+thecollisionratefrom0.230    to0.216   ,a6.1%    relativereduction,andachievedthelowestTotalCCES
+(3.8447   ); theSafetyratio improvedto0.9264   ,the lowest amongthefour rows,consistent withthe
+design intent of biasing supervision toward safety-critical chunks.
+
+Table 2: Ablating CL, CLEF, and TIS. All four rows were initialized from theH=6    checkpoint and
+additionallytrainedon128GPUs. ADE/FDEinmeters;Coll. isthepercentagecollisionfailrate(%);
+Compl., Comfort, Eff.,and Safety areunitless ratios asin Table1. Loweris better.Cont.: continue
+trainingatH=6   ;CL: basiccurriculumlearning;CLEF:curriculumlearning withextendedforesight;
+TIS: temporal importance sampling.
+ Method                  ADE↓              FDE↓            Coll.↓    Compl.↓Comfort↓ Eff.↓ Safety↓                   Total↓
+                      Lat.     Long.     Lat.     Long.
+ Cont.H=6           0.1741  1.1807  0.4344  3.0087          0.270      0.9302       1.0515     0.9980   0.9726       3.9523
+ +H=21, CL          0.1718  1.1671  0.4277  2.9856          0.238      0.9326       1.0106     1.0003   0.9310       3.8745
+ +H=21, CLEF        0.1692  1.1571  0.4181  2.9421          0.230      0.9320       1.0076     0.9951   0.9387       3.8734
+ +H=21, TIS         0.1696  1.1578  0.4195  2.9413          0.216      0.9187       1.0043     0.9953   0.9264       3.8447
+
+
+Production-Scale Comparison.Table3reported the headline comparison at production scale,
+combining long-horizon training (H=21   ) with CLEF and TIS, trained on 1024 GPUs against the
+baseline trained at the same scale. The full X-Foresight model reduced lateral/longitudinal ADE
+by 6.4%/3.6%              (0.1675→0.1567                   lat; 1.1387→1.0982                   long) and lateral/longitudinal FDE by
+8.8%/4.1%              (0.4153→0.3789                   lat; 2.9117→2.7924                   long). Collision rate dropped from 0.228%
+to 0.191%   , a 16.2%      relative reduction.  All four CCES categories improved:  Safety by 9.1%   ,
+Compliance by 8.2%   , Comfort by 1.0%   , and Efficiency by 0.4%   .  The aggregate Total CCES
+improved from3.8296    to3.6535   , a4.6%    relative reduction, with the gains concentrated in Safety
+and Compliance, consistent with the central claim that long-horizon world-causality supervision
+improved safety-critical decision quality.
+
+Table 3: Production-scalecomparison against thebaseline, bothtrainedon 1024GPUs. X-Foresight
+(Ours)usedH=21    withCLEFandTIS.ADE/FDEinmeters;Coll. isthepercentagecollisionfail
+rate (%); Compl., Comfort, Eff., and Safety are unitless ratios as in Table1. Lower is better.
+  Method               ADE↓              FDE↓            Coll.↓    Compl.↓Comfort↓ Eff.↓ Safety↓                  Total↓
+                    Lat.     Long.     Lat.     Long.
+  Baseline        0.1675  1.1387  0.4153  2.9117          0.228     0.9483       0.9505     0.9867   0.9441        3.8296
+  X-Foresight     0.1567  1.0982  0.3789  2.7924          0.191     0.8708       0.9413     0.9831   0.8583        3.6535
+
+The two scenarios in Fig7illustrated how this aggregate gain manifested qualitatively, both turning
+on correct action toward events that lay ahead in space or in time, the central capability the baseline
+lackedbyconstruction. Inthetoppanel,theegoenteredamulti-exitroundaboutunderanavigation
+instruction that directed it to take a later exit rather than the first one. The baseline committed to
+the closest visible exit and emitted a trajectory that veered off the lane, diverging substantially from
+the groundtruth. X-Foresight heldthe roundabout laneand tracked the groundtruth all thewayto
+the intended exit, anchoring its action on the long-horizon navigation target rather than on the most
+salientlocalcue. In thebottompanel,the egoapproachedanighttime intersectionwhilethetraffic
+light was still red at the current frame; the underlying log confirmed that the light would turn green
+beforetheegoreachedthestopline,sotheground-truthtrajectorycontinuedthroughtheintersection
+without braking. The baseline treated the present red signal as an immediate stop and truncated its
+predictionwellbeforethestopline. X-Foresightanticipatedthesignaltransitionthroughitspredictive
+rollout and produced a continuous trajectory matching the ground truth.
+
+
+                                                             13
+
+===== PAGE 14 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 7: Qualitativecomparisons. The baseline failed on events lying ahead inspace (top, a far-exit
+instructioninamulti-exitroundabout)orintime(bottom,aredlightthatturnedgreenbeforearrival);
+X-Foresight tracked the ground truth in both.
+
+
+                 Table 4: Training throughput comparison over long-horizon sequences.
+                       Attention implementation    Per-step time (s)↓  Speedup↑
+                       FlashAttention-2 [4]                       24.50                  1.00×
+                       BSA w/ mask (ours)            15.40                1.59×
+
+
+4.1.2   Acceleration
+We optimized the Block Sparse Attention (BSA) kernel for our target hardware and integrated it as a
+drop-in replacement for FlashAttention-2 (FA2). Table4reported the wall-clock time per training
+stepbefore andafterthis change,withthe FA2 baselineusinga standard causalmask. Per-steptime
+wasmeasuredunderidenticalmodelandtrainingconfigurations,withtheattentionimplementation
+and associated mask being the only changes. Pairing BSA with our tailored sparsity pattern reduced
+per-step time from 24.50s to 15.40s, a 1.59× speedup, confirming that attention was the major
+bottleneckandthatthesavingsfromoursparsitydesigntranslateddirectlyintoend-to-endtraining
+throughput.
+
+4.1.3   CameraLatentDecoder
+In long-horizon rollouts, future observations were generated recursively from the model’s own
+decoded latent, making the structure and consistency of the latent space critical to stable future
+predictionand downstream planning performance. However,our visionrendererwasdiffusion-based,
+where renderedimages wereinfluenced bystrong generative priorsand samplingstochasticity rather
+than being deterministic projections of the latent representation. Consequently, rendered outputs
+could not reliably reflect the underlying latent space.
+Toaddress this issue, weintroduced a lightweightCamera Latent Decoder tovisualize the predicted
+latent space, following prior works [7] [16]. Unlike diffusion-based rendering, our latent decoder
+provideda morefaithfuland stableprojectionof thelatent representation, enablingdirect inspection
+ofspatialstructure, temporalconsistency,and multi-viewalignment. Thiscapabilitywas essential
+for diagnosinglatent drift,understanding error accumulationin long-horizonrollouts, and ensuring
+that the learned latent space satisfied the structural assumptions required by the downstream vision
+renderer.
+
+
+                                                           14
+
+===== PAGE 15 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+Toenabledirectinspectionofthepredictedlatentspace,wetrainedalightweightlatentdecoderthat
+reconstructedimagesequencesfromthemodel’sspatio-temporallatentrepresentations. Givenlatent
+representations extracted from the world model, the decoder progressively upsampled along both
+temporal and spatial dimensions to reconstruct high-resolution imageframes from the compressed
+latentrepresentation. Thedecoderadoptedalightweightconvolutionalarchitecturewithprogressive
+spatio-temporalupsamplingbasedoncausal3DResNetblocks. Alightweightspatialself-attention
+module was introduced at the lowest-resolution stage to enable global feature interaction, allowing
+efficient reconstructionof high-resolution image sequencesfrom the predicted latent representations.
+
+4.2   VisionRenderer
+
+4.2.1   TrainingProcess
+WeinitializedtheVisionRendererfromX-Worldweights,retainingalltransferableparametersofthe
+DiTbackboneandthe3DcausalVAE.Thenewlyintroducedcamera-tokencross-attentionbranch
+was randomly initialized, while the action, dynamic-agent, static-element, and text-conditioning
+branchesinheritedfromX-WorldwerediscardedinstageIII.Trainingdataconsistedofsynchronized
+multi-view driving clips paired with LDM-produced camera tokens for the same intervals, so that
+therendererlearnedtodenoisefutureframesundertheexacttokendistributionitwouldconsumeat
+inference.
+To bridge the gap between X-World’s pre-training regime and the closed-loop deployment setting
+ofX-Foresight,wefollowedadecoupled-then-alignedschedulespanningthetworenderertraining
+stages: in stage II the renderer was adapted independently of the LDM under ground-truth action
+conditioning,whileinstageIIItheLDMwasfrozenandonlytherendererwasfine-tunedtoconsume
+the LDM’s predicted camera tokens.
+
+Stage II: Renderer Pretraining.  We first fine-tuned the diffusion renderer on the multi-view
+drivingcorpustoadaptitfromX-World’s12Hzpre-trainingcadencetothe4Hzcadenceemittedby
+X-Foresight’sLDM.Weoptimizedtherectified-flowobjectiveonsubsampledvideostreamswiththe
+VAEtemporal stride adjusted accordingly. The LDM was frozen throughout this stage. The renderer
+retainedX-World’soriginalaction-conditioningbranch(consumingground-truthegoactionsrather
+thanLDM-predictedcameratokens);thecamera-tokencross-attentionbranchthatwouldreplaceitin
+stage III was not yet active. We used the Muon optimizer with a constantlearning rate of8×10    −5  ,
+batch size1per device, and128GPUs.
+
+StageIII:RendererAlignment.Inthethirdstage,wesplicedtherendererontotheLDM,swapped
+theconditioningsource,andfrozetheLDM sothatonlytherendererreceivedgradients. The action-
+conditioningbranchusedduringstageII,togetherwithX-World’sdynamic-agent,static-element,and
+text-conditioningbranches,wereallremoved;therendererwasexposedexclusivelyto(i)multi-view
+history latents and (ii) LDM-produced camera tokens through the newly activated cross-attention
+branch, committing the DiT to the LDM’s latent imagination as its sole control signal. The renderer
+was then finetuned under the rectified-flow velocity-matching objectiveLvelocity in Eq. (8), now
+conditionedonthe LDM’spredictedcameratokens. To fitthemodelintodevicememory,we applied
+activation checkpointingon every DiTblock andsharded therenderer’sparameters, gradients,and
+optimizer states with FSDP; the LDM was kept in inference mode and contributed only forward
+activations. WeoptimizedwithMuonunderaone-cyclecosinelearning-rateschedule,tunedforstable
+convergenceofthediffusionvelocityfield. FromstageIIIonwardwemonitoredthecontrollability
+of the renderer by periodically comparing its samples against the Camera Latent Decoder’s pixel
+decodeofthesamecameratokens,asdescribedinSection4.1.3;therenderer’ssamplesconsistently
+alignedwith theCamera LatentDecoder’s pixeldecodeof thesame cameratokens, confirming that
+the rendered frames faithfully tracked the LDM’s camera-token condition.
+
+4.2.2   Results
+Fig8visualized a 6-second rollout from the Vision Renderer across all seven surround-view cameras
+(lefttoright: leftrear,leftfront,frontnarrow,frontfisheye,rear,rightfront,rightrear). Thevertical
+axis was time, with the ground-truth observation at t= 0  s at the top and 6s of predicted future
+extendingdownward. EachARstepemittedonesecondofcameratokensat4Hz,whichtherenderer
+decoded into four frames per camera; six consecutive steps yielded the full horizon shown.
+
+
+                                                       15
+
+===== PAGE 16 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure8: VisualizationoftheVisionRendererconditionedoncameratokens. Thehorizontalaxis
+spans the seven surround-view cameras (left rear, left front, front narrow, front fisheye, rear, right
+front, rightrear), and the verticalaxis spans timefromt= 0  s (groundtruth) tot= 6  s ofpredicted
+future. The blue overlay on the front-narrow and front-fisheye views shows the trajectory predicted
+by the LDM from action tokens, which the renderer never sees.
+
+
+To probe whether camera tokens encoded the ego-vehicle’s intended motion, we overlaid on the
+front-narrowandfront-fisheyeviewsthetrajectorypredictedbytheLDMfromitsactiontokens(blue
+line). The renderer was not conditioned on these action tokens (Section 3), so the trajectory served as
+anindependentreference: itrevealedtheLDM’sintentbutcouldnotinfluencetherenderedscene.
+Despitethisseparation,thetrajectoryremainedtightlyalignedwiththesynthesizedframesacrossthe
+full6-secondhorizon,consistentlytracingapathgeometricallyconsistentwiththelaneconfiguration,
+surrounding agents, and ego pose. This indicated that the camera tokens already encoded the ego
+trajectoryand scenedynamics, andthat therenderer wasgenuinely controlledby theLDM’slatent
+imagination rather than hallucinating from history alone.
+Table5reported quantitative image-quality metrics for both the Camera Latent Decoder and the
+Vision Renderer, evaluated at a 1-second horizon (single AR step) and at the 6-second horizon.
+FID [9] was computed over all seven surround-view cameras at 4Hz (four frames per camera per
+second),withground-truthreferencessampledfrom200krandomclipsinthetestdataset. FVD[17]
+wascomputedpercameraoveritstemporalsequenceandthenaveragedacrossthesevencameras. The
+decoderreflectedreconstructionqualityofcameratokensinisolation,whiletherenderermeasured
+end-to-end generation quality from the autoregressive rollout.
+
+
+Table 5: Image-quality metrics for the Camera Latent Decoder and Vision Renderer at 1s and 6s
+horizons.
+                          Method                                      FID↓                  FVD↓
+                                                          1s          6s           1s            6s
+                          Camera Latent Decoder     10.97     11.82     135.56     158.39
+                          Vision Renderer                  1.51       2.84       11.28       29.52
+
+
+                                                           16
+
+===== PAGE 17 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+Taken together, Fig8and Table5demonstrated that the Vision Renderer produced high-fidelity
+multi-viewimagerysuitableforclosed-loopinferencewithinX-Foresight. Quantitatively,therenderer
+reachedFID/FVDof1.51/11.28               ata1shorizonand2.84/29.52               at6s,reducingFID/FVDrelativeto
+theCameraLatentDecoderby10.97/135.56                   at1sand11.82/158.39                   at6s. Themodestdegradation
+from1sto6s—anabsoluteincreaseof1.33    FIDpointsand18.24      FVDpoints—indicatedthatthe
+autoregressive rollout accumulatedonly limited drift across the fullprediction window, an essential
+property for closed-loop deployment where each step’s output conditions the next. Qualitatively,
+the LDM-predicted trajectory in Fig8remained geometrically consistent with the rendered scene
+throughoutthe6-secondhorizondespitetherendererneverreceivingactiontokens,confirmingthat
+theLDM’scameratokens alreadyencoded theego trajectoryand surroundingscenedynamics with
+sufficientfidelityfortheDiTtofaithfullyvisualizetheLDM’slatentimagination. Together,these
+results established that the Vision Renderer met the fidelity, controllability, and temporal-stability
+requirements needed to serve as the pixel-space front-end of X-Foresight’s closed-loop inference
+loop.
+
+5   Conclusion
+
+Wepresented X-Foresight,apredictiveworldmodel thatequipped VLAmodelswith aninternalized
+understandingofthephysicalworldbyforecastinghigh-fidelitymulti-viewcameraobservationswhile
+maintainingreal-timeactioncontrol. Theproposedchunk-wiseauto-regressivestrategyaddressed
+twokeychallengesinvideo-basedworldmodeling: degenerationinfuturerolloutsandthetemporal
+mismatch between instantaneous dynamics and long-horizon world causality.  Furthermore, we
+introducedacurriculumlearningschedulethatprogressivelyextendedpredictionhorizons,stabilizing
+training and improving control robustness.  We also employed temporal importance sampling to
+concentrate supervision on safety-critical chunks, thereby enhancing the model’s ability to learn
+decision-relevantdynamicsandbetterunderstandworldcausality. Finally,photorealisticsynthesis
+wasdelegatedtoadiffusion-basedmulti-viewrenderer,whichprovidedpixel-levelsupervisionand
+improved rollout stability.
+Our work extended world model research to industrial-scale data and established a foundation for
+several future research directions. First, incorporating additional supervision during closed-loop
+rollout might further improve long-tail performance in autonomous systems. Second, integrating
+richer modalities, such as 3D geometric supervision, might enhance the model’s physical world
+knowledge. Third, more advanced training strategies, such as coarse-to-fine world reconstruction,
+might help unlock the model’s full potential for comprehensive world understanding.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                         17
+
+===== PAGE 18 =====
+
+       PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+Acknowledgments
+
+We sincerely thank our predictive world model team for their passionate exploration, valuable
+discussions, and hard work throughout this project. We also thank our sibling GWM team for their
+excellentworkonX-World[22],whichwebuilduponforpretrainingourdiffusion-basedrenderer. In
+particular, weare grateful to our advisors, Yu Zhang and Xianming Liu, for their insightfulguidance
+on world model design, which was instrumental to the development of this work. We also thank
+XPeng for providing the platform, tools, and support that made this work possible.
+We further acknowledge the broader research community, whose progress in world modeling, vision-
+language-action models, and generative modeling has inspired and informed our contribution to
+predictive world modeling.
+
+Contributors
+
+Advisors:Yu Zhang, Xianming Liu
+ProjectLead:Zhuangzhuang Ding, Pengkun Zheng
+Contributors:Baolu Li              *, Jingyu Qian*, Rui Guo*, Yilun Chen*, Hanpeng Liu, Yuan Lin, Junhong
+           Zhou,RuixinLiu,LiuYang,YutongZheng,ZhenliZhang,SeanLi,ChaodaZheng,Boyang
+           Wang
+TechnicalProgramManager:Tenglong (Victor) Gu
+
+*Core contribution. The first four authors are listed in alphabetical order.
+
+References
+
+ [1]  Mahmoud Assran, Quentin Duval, Ishan Misra, Piotr Bojanowski, Pascal Vincent, Michael Rabbat, Yann
+      LeCun, and Nicolas Ballas.  Self-supervised learning from images with a joint-embedding predictive
+      architecture.  InIEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), pages
+      15619–15629, 2023.
+ [2]  Tim Brooks,BillPeebles, ConnorHolmes, WillDePue, Yufei Guo,Leo Jing, DavidSchnurr,Joe Taylor,
+      Troy Luhman, Eric Luhman, et al. Video generation models as world simulators.OpenAI Blog, 1(8):1,
+      2024.
+ [3]  Jake Bruce,Michael D Dennis, AshleyEdwards, Jack Parker-Holder,Yuge Shi,Edward Hughes, Matthew
+      Lai,AditiMavalankar,RichieSteigerwald,ChrisApps,etal. Genie: Generativeinteractiveenvironments.
+      InInternational Conference on Machine Learning (ICML), 2024.
+ [4]  TriDao. Flashattention-2: Fasterattention withbetter parallelismand workpartitioning. InInternational
+      Conference on Learning Representations, volume 2024, pages 35549–35562, 2024.
+ [5]  Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas
+      Unterthiner,MostafaDehghani,MatthiasMinderer,GeorgHeigold,SylvainGelly,etal. Animageisworth
+      16x16 words: Transformers for image recognition at scale.arXiv:2010.11929, 2020.
+ [6]  Danny Driess, Fei Xia, Mehdi SM Sajjadi, Corey Lynch, Aakanksha Chowdhery, Brian Ichter, Ayzaan
+      Wahid, Jonathan Tompson, Quan Vuong, Tianhe Yu, et al. Palm-e: An embodied multimodal language
+      model.arXiv:2303.03378, 2023.
+ [7]  YuanGao,ChenChen,TianrongChen,andJiataoGu. Onelayerisenough: Adaptingpretrainedvisual
+      encoders for image generation.ArXiv, 2512.07829, 2025.
+ [8]  Junxian Guo, Haotian Tang, Shang Yang, Zhekai Zhang, Zhijian Liu, and Song Han.  Block Sparse
+      Attention.https://github.com/mit-han-lab/Block-Sparse-Attention, 2024.
+ [9]  Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter.  Gans
+      trained by a two time-scale update rule converge to a local nash equilibrium.Advances in Neural
+      Information Processing Systems (NeurIPS), 30, 2017.
+[10]  Xun Huang, Zhengqi Li, Guande He, Mingyuan Zhou, and Eli Shechtman. Self forcing: Bridging the
+      train-test gap in autoregressive video diffusion.Advances in Neural Information Processing Systems
+      (NeurIPS), 38:167283–167308, 2026.
+[11]  Moo Jin Kim, Karl Pertsch, Siddharth Karamcheti, Ted Xiao, Ashwin Balakrishna, Suraj Nair, Rafael
+      Rafailov,EthanFoster,GraceLam,PannagSanketi,etal. Openvla: Anopen-sourcevision-language-action
+      model.arXiv:2406.09246, 2024.
+
+
+                                                            18
+
+===== PAGE 19 =====
+
+       PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+[12]World Labs. Marble: World Labs Spatial Intelligence.https://www.worldlabs.ai/, 2026.
+[13]Xingyang Li, Muyang Li, Tianle Cai, Haocheng Xi, Shuo Yang, Yujun Lin, Lvmin Zhang, Songlin Yang,
+      JinboHu,KellyPeng,etal. Radialattention: O(nlogn)               sparseattentionwithenergydecayforlongvideo
+      generation. InAdvances in Neural Information Processing Systems (NeurIPS), 2025.
+[14]  Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching for
+      generative modeling. InInternational Conference on Learning Representations (ICLR), 2023.
+[15]  WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InIEEE/CVFInternational
+      Conference on Computer Vision (ICCV), pages 4195–4205, 2023.
+[16]  MingleiShi,HaolinWang,WenzhaoZheng,ZiyangYuan,XiaoshiWu,XintaoWang,PengfeiWan,Jie
+      Zhou,andJiwenLu. SVG:Latentdiffusionmodelwithoutvariationalautoencoder.arXiv:2510.15301,
+      2025.
+[17]  Thomas Unterthiner, Sjoerd van Steenkiste, Karol Kurach, Raphaël Marinier, Marcin Michalski, and
+      SylvainGelly.Towardsaccurategenerativemodelsofvideo: Anewmetric&challenges.arXiv:1812.01717,
+      2018.
+[18]  Team Wan,  Ang Wang,  Baole Ai,  Bin Wen,  Chaojie Mao,  Chen-Wei Xie,  Di Chen,  Feiwu Yu,
+      Haiming Zhao, Jianxiao Yang, et al.  Wan: Open and advanced large-scale video generative models.
+      arXiv:2503.20314, 2025.
+[19]XPeng Inc. XPeng VLA 2.0.https://www.xpeng.com, 2026.
+[20]  Tianwei Yin, QiangZhang, Richard Zhang,William T Freeman,Fredo Durand, EliShechtman, and Xun
+      Huang. Fromslowbidirectionaltofastautoregressivevideodiffusionmodels. InIEEE/CVFConference
+      on Computer Vision and Pattern Recognition (CVPR), pages 22963–22974, 2025.
+[21]  Shenghai Yuan, Yuanyang Yin, Zongjian Li, Xinwei Huang, Xiao Yang, and Li Yuan.  Helios: Real
+      real-time long video generation model.arXiv:2603.04379, 2026.
+[22]  Chaoda Zheng, Sean Li, Jinhao Deng, Zhennan Wang, Shijia Chen, Liqiang Xiao, Ziheng Chi, Hongbin
+      Lin,KangjieChen,BoyangWang,etal. X-world: Controllableego-centricmulti-cameraworldmodelsfor
+      scalable end-to-end driving.arXiv:2603.19979, 2026.
+[23]  Brianna Zitkovich,Tianhe Yu, Sichun Xu, PengXu, Ted Xiao, Fei Xia, JialinWu,Paul Wohlhart, Stefan
+      Welker, Ayzaan Wahid, et al. Rt-2: Vision-language-action models transfer web knowledge to robotic
+      control. InConference on Robot Learning (CoRL), pages 2165–2183. PMLR, 2023.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                             19

@@ -1,0 +1,12 @@
+{
+  "article_id": "what-can-rl-bring-to-vla-generalization",
+  "paper_title": "What Can RL Bring to VLA Generalization? An Empirical Study",
+  "source_pdf": "sources/What Can RL Bring to VLA Generalization - An Empirical Study.pdf",
+  "sha256": "2dc2c73ab51cf2a97f6e3223cf5dd229632afd599a38a9b515f39d46c2e411a9",
+  "page_count": 24,
+  "text_output": "work/what-can-rl-bring-to-vla-generalization/paper.txt",
+  "rendered_pages": [
+    1
+  ],
+  "prepared_at": "2026-09-25T09:55:31.687731+00:00"
+}

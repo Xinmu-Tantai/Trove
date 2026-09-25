@@ -1,0 +1,14 @@
+{
+  "article_id": "vla-rl",
+  "paper_title": "VLA-RL: Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning",
+  "source_pdf": "sources/VLA-RL - Towards Masterful and General Robotic Manipulation with Scalable Reinforcement Learning.pdf",
+  "sha256": "8016399c5af6084fde140d8744df0a49248f69e4af207b15f5b90049f06c056a",
+  "page_count": 15,
+  "text_output": "work/vla-rl/paper.txt",
+  "rendered_pages": [
+    1,
+    2,
+    3
+  ],
+  "prepared_at": "2026-09-25T10:11:26.269193+00:00"
+}

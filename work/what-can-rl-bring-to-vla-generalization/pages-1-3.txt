@@ -1,0 +1,186 @@
+===== PAGE 1 =====
+
+         What Can RL Bring to VLA Generalization?
+                                    An Empirical Study
+
+
+
+                                   Jijia Liu1∗   Feng Gao2∗    Bingwen Wei1
+                   Xinlei Chen1     Qingmin Liao1     Yi Wu2     Chao Yu1†    Yu Wang3†
+                      1Shenzhen International Graduate School, Tsinghua University
+                2Institute for Interdisciplinary Information Sciences, Tsinghua University
+                       3Department of Electronic Engineering, Tsinghua University
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 1: Overview of our study for evaluating how RL enhances VLA generalization in terms of
+Vision,Semantics,andExecution: inout-of-distributiontests,RLyieldssubstantialgainsinExecution,
+moderate improvements inSemantics, and performance on par with SFT forVision.
+
+                                                   Abstract
+
+          Large Vision-Language Action (VLA) models have shown significant potential
+          for embodied AI. However, their predominant training via supervised fine-tuning
+          (SFT) limits generalization due to susceptibility to compounding errors under
+          distribution shifts. Reinforcement learning(RL) offers a pathto overcomethese
+          limitations by optimizing for task objectives via trial-and-error, yet a systematic
+          understanding of its specific generalization benefits for VLAs compared to SFT
+          is lacking.  To address this, our study introduces a comprehensive benchmark
+          for evaluating VLA generalization and systematically investigates the impact of
+
+   ∗Equal contribution. {liujj23,gaof22}@mails.tsinghua.edu.cn
+   †Corresponding authors: {yuchao, yu-wang}@mail.tsinghua.edu.cn
+
+
+39th Conference on Neural Information Processing Systems (NeurIPS 2025).
+
+===== PAGE 2 =====
+
+          RL fine-tuning across diverse visual, semantic, and execution dimensions. Our
+          extensive experiments reveal that RL fine-tuning, particularly with PPO, signifi-
+          cantlyenhancesgeneralizationinsemanticunderstandingandexecutionrobustness
+          overSFT, whilemaintainingcomparablevisualrobustness. WeidentifyPPOas a
+          moreeffectiveRLalgorithmforVLAsthanLLM-derivedmethodslikeDPOand
+          GRPO.WealsodevelopasimplerecipeforefficientPPOtrainingonVLAs,and
+          demonstrate its practical utility for improving VLA generalization. The project
+          page is athttps://rlvla.github.io.
+
+1   Introduction
+
+Vision-Language-Action(VLA)modelsrepresentanemergingclassoffoundationmodels(Maetal.,
+2024; Firooziet al., 2023) that unifyperception, language understanding, andembodied control. By
+leveraging vision-language models pretrained on internet-scale data and further training on large,
+heterogeneousrobotdemonstrationdatasets(Collaborationetal.,2023;Khazatskyetal.,2024),VLAs
+can interpret sensor observations and natural language instructions to directly map them to robot
+actions. This paradigm has demonstrated promising generalization across diverse tasks—including
+single-arm, bimanual, and mobile manipulation (Team et al., 2024; Kim et al., 2024; Liu et al., 2024;
+Wenetal.,2025),navigation(Shahetal.,2022),andevencomplexlong-horizonactivitieslikekitchen
+or bedroom cleaning in unseen scenarios (Black et al., 2024; Intelligence et al., 2025).
+Despite this promise, VLA model training predominantly relies on supervised fine-tuning (SFT)
+through behavioral cloning of demonstration labels (Kim et al., 2025). This approach, whether in
+pretrainingorfew-shotadaptation,isinherentlysusceptibletocompoundingerrorsunderdistribution
+shift: minordeviationsfromexperttrajectoriescanaccumulate,steeringthepolicyintounfamiliar
+statesand underminingrobust performance(Rossand Bagnell,2010; DeHaan etal., 2019;Belkhale
+etal.,2023;Fosteret al.,2024). Thismismatchbetweentrainingand testingdistributions fundamen-
+tally limits robustness, with research highlighting issues like quadratic regret growth relative to the
+task horizon under such conditions (Ross and Bagnell, 2010).
+Incontrast,reinforcementlearning(RL)offersaparadigmthatdirectlyoptimizescumulativetask
+rewards through trial-and-error, enabling policies to explore beyond narrow expert data and learn
+corrective behaviors. Crucially, in the broader foundation model landscape, particularly for Large
+LanguageModels(LLMs)andVision-LanguageModels(VLMs),recentstudieshaveunderscored
+RL’s advantages for generalization (Ouyang et al., 2022; Zhai et al., 2024; Huang et al., 2025).
+Compelling evidence suggests thatwhile SFT tends tomemorize training data, RL fine-tuningcan
+lead tosubstantially betterout-of-distribution performanceand unlockgreater reasoning capabilities
+(Chu et al., 2025; Huang et al., 2025; Ma et al., 2025). Drawing from RL’s established success in
+roboticsandtheseencouragingresultsfromotherlarge-scalemodels,RLfine-tuningisincreasingly
+being applied to VLAs (Collaboration et al., 2023; Walke et al., 2023; Khazatsky et al., 2024),
+with approaches ranging from incorporating human feedback (Chen et al., 2025) to using offline
+RL updates (Zhang et al., 2024b) or algorithms like PPO (Schulman et al., 2017), sometimes in
+multi-stage processes with imitation learning (Guo et al., 2025b).
+However, despitethese pioneeringefforts,a systematicunderstanding ofwhat specificgeneralization
+benefitsRL fine-tuningconfers uponVLAs, especiallyin directcomparisonto SFTbaselines, and
+how theirrespective strengthsdiffer, remainsinsufficientlydeveloped(Huet al.,2024;Mark etal.,
+2024). Forinstance,whilerecentworklikeFLaRe(Huetal.,2024)demonstratedPPO’sutilityfor
+fine-tuning VLAs, a comprehensive analysis of the resulting model’s generalization capabilities was
+not its primary focus.
+Thispaperaimstoaddressthiscriticalgap. Weundertakeasystematicstudytodissectthegeneral-
+ization properties of VLAs fine-tuned with RL versus SFT.
+
+          Specifically,weempiricallyinvestigate: WhatuniquebenefitscanRLbringtoVLA
+          generalization compared to supervised fine-tuning?
+To answer this, we center our investigations on the representativepick-and-placetask.  On this
+task, we first evaluate mainstream RL algorithms for large-scale models (PPO (Schulman et al.,
+2017; Ouyang et al., 2022), DPO (Rafailov et al., 2023; Zhang et al., 2024b), GRPO (Shao et al.,
+2024; Guo et al., 2025a)) to identify effective VLA fine-tuning strategies. We then conduct a broad
+
+
+                                                         2
+
+===== PAGE 3 =====
+
+comparative evaluation, also on pick-and-place, pinpointing where RL fine-tuning outperforms
+SFT. As previewed in Fig. 1, this comprehensive evaluation rigorously examines generalization
+across three key dimensions: 1)Vision: challenging generalization with novel backgrounds (unseen
+tables) and by overlaying unseen textures on the foreground or the entire image.  2)Semantics:
+testingunderstanding viaunseen objects,novel receptacles, and varied instructionphrasings toprobe
+language sensitivity and object recognition.  3)Execution: probing robustness by varying initial
+robotstates,object/receptaclepositions,andintroducingdynamicdisturbanceslikerandomobject
+reposition within episodes.
+Through extensive experiments and deep analyses, we:
+
+        •  Establish a rigorous and challenging benchmark to evaluate how VLA fine-tuning methods
+          affect generalization across diverse visual, semantic, and execution dimensions.
+        •  IdentifyPPOasthepreferredRLalgorithmforVLAfine-tuningoverGRPOandDPO,while
+          also discuss key challenges in adapting these RL algorithms from LLM/VLM paradigms to
+          the distinct requirements of VLAs.
+        •  Develop an efficient PPO-based VLA fine-tuning recipe, enabled by a shared actor-critic
+          backbone, VLA model warm-up, and minimal PPO training epochs.
+        •  DemonstrateRL’ssuperiorgeneralizationoverSFTinsemanticunderstandingandembodied
+          execution for VLAs, while maintaining comparable visual robustness.
+
+2   Related works
+2.1   Vision-Language-Action (VLA) models
+In robotic tasks that utilize both vision and language inputs, recent research demonstrates that
+leveraging knowledge from pre-trained LLMs or VLMs (Chen et al., 2023; Driess et al., 2023;
+Karamchetietal.,2024;Beyeretal.,2024)leadstobetterpolicygeneralizationcomparedtosmaller
+models(Zhaoetal.,2023;Chietal.,2023). Byharnessingthecapabilitiesofthesefoundationmodels
+and utilizing large-scale robotic datasets, VLA models (Brohan et al., 2023b,a; Team et al., 2024;
+Kimetal.,2024;Liuetal.,2024;Wuetal.,2023;Cheangetal.,2024;Blacketal.,2024;Intelligence
+et al., 2025) provide a strong basis for embodied agent. Our work builds upon VLA and seeks to
+further improve its generalization abilities.
+
+2.2   RL fine-tuning for large-scale (Vision-)Language Models
+Fine-tuning large language models has shown promising results (Stiennon et al., 2020; Ouyang et al.,
+2022; Achiam et al., 2023), especially when using high-quality supervised data (Zhang et al., 2024a;
+Zhu et al., 2023; Zhang et al., 2023b). Some work aims to align LLMs with human preferences
+for helpfulness and safety (Kaufmann et al., 2023; Bai et al., 2022), using online RL algorithms
+(Schulmanetal.,2017;Ramamurthyetal.,2023;Zhengetal.,2023)orofflineupdates(Rafailovetal.,
+2023; Ivisonet al.,2024; Xuet al.,2024). Other studieshaveshownthat onlineRL fine-tuningon
+mathandcodingtasks(Shaoetal.,2024;Guoetal.,2025a)cansignificantlyimprovethereasoning
+abilitiesofLLMs(Guoetal.,2025a;Jaechetal.,2024;Teametal.,2025). AlthoughRLhasbeen
+extensively explored inLLMs (Chu etal., 2025), itsgeneralization potentialfor similar-scale VLA
+models remains underexplored.
+
+2.3   Fine-tuning policies for robotic tasks
+VLA fine-tuning largely relies on supervised data (Kim et al., 2025; Liu et al., 2025; Zhao et al.,
+2025;Zhengetal.,2024). However,thescarcityofextensiveandhigh-qualitydataoftenhampersthe
+ability ofVLAs to generalizeto unseen scenariosor perturbations (Collaborationet al., 2023;Walke
+etal.,2023;Khazatskyetal.,2024). Tomovebeyondimitationandenablereward-drivenlearning,
+RLfine-tuning hasbeen exploredin various settings, fromsmall-scale models(Ren etal., 2024)to
+large models with human interventions (Chen et al., 2025), or through offline updates (Zhang et al.,
+2024b). Guoetal.(2025b) proposedusingPPO(Schulman etal.,2017)to fine-tuneVLAmodels,
+incorporating imitation learning in a two-stage process. Despite these efforts, the generalization
+ability of RL fine-tuning in VLA models remains insufficiently studied (Hu et al., 2024; Mark et al.,
+2024). Moreover,wefindthatVLAscanbedirectlyfine-tunedwithonlinePPOwithoutadditional
+training stages or imitation learning, underscoring RL’s scalability for robot tasks.
+
+
+                                                         3
+

@@ -1,0 +1,5 @@
+# Local extraction dependencies and generated Python bytecode
+work/**/vendor/
+work/.pycache/
+__pycache__/
+*.py[cod]

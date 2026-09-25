@@ -58,7 +58,7 @@ description: 提取论文或技术文章的原文内容，按独立 Markdown 模
 
 ## 输出与检查
 
-本知识库根目录为 `/Users/huijie/Desktop/node/Trove`。所有工作文件均放在该目录内：原文放 `sources/`，临时文件、页面渲染和脚本放 `work/`，提取笔记放 `articles/<article-id>/index.md`，对应图像放 `articles/<article-id>/assets/`。相对路径以知识库根目录为准。模板使用根目录下的 `templates/article-template.md`。用户只要求聊天输出时在聊天中提供。除非用户另行指定，不向知识库之外写入任务文件。
+本知识库根目录为 `/Users/huijie/Desktop/node/Trove`。所有工作文件均放在该目录内：原文放 `sources/`，临时文件、页面渲染和脚本放 `work/`，提取笔记直接放 `articles/<论文标题>.md`，对应图像统一放 `articles/images/`，并以文章标识作为文件名前缀。相对路径以知识库根目录为准。模板使用根目录下的 `templates/article-template.md`。用户只要求聊天输出时在聊天中提供。除非用户另行指定，不向知识库之外写入任务文件。
 
 提交前核对：摘要和引言的覆盖范围、贡献是否遗漏、关键数字和编号、图表可读性、图片路径、来源链接，以及事实与作者结论的归属。清除未填写的占位符；缺失内容采用明确的缺失说明。
 

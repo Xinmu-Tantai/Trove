@@ -1,0 +1,192 @@
+===== PAGE 1 =====
+
+X-Foresight: AJointVision-ActionCausalForecasting
+              NetworkviaPredictiveWorldModeling
+
+
+
+
+                                             PWMTeam,XPengInc.
+                                       https://x-foresight-1.github.io
+
+
+                                                  Abstract
+
+          Physical world knowledge resides mainly in videos. Equipping Vision-Language-
+          Action (VLA) models with such knowledge is fundamental for safe and gener-
+          alizable planning. To extract this knowledge from video data, predictive world
+          modeling enables VLA to internalize physical dynamics and long-term causality
+          by predicting future video from past observations.  However, naive next-frame
+          predictionfacestwochallenges: 1)unlikesemanticallydistincttexttokens,video
+          tokensareinherentlylow-entropyandredundant,causingpredictiontoeasilyde-
+          generateintotrivialextrapolation. 2)worldmodelingposesatemporaldilemma:
+          instantaneous dynamics need dense frame prediction, while long-term causality
+          unfolds over long and variable-size horizons that dense prediction cannot effi-
+          ciently cover. To learn world knowledge effectively, we introduceX-Foresight,
+          a predictive world model integrated directly into the VLA architecture to jointly
+          learn world modeling and real-time action control. At its core lies long-horizon
+          chunk-wiseauto-regressivestrategy, that addressesboth challenges: By predicting
+          across semantically distant chunks rather than adjacent frames, it escapes trivial
+          extrapolation, while preserving dense intra-chunk frames to capture instantaneous
+          dynamicsandsparseinter-chunktransitionstocapturelong-termcausality,resolv-
+          ingboththeentropyand temporal-dilemmachallengesattractabletrainingcost. A
+          curriculum learning schedule is further utilized to progressively extend prediction
+          horizons and stabilize long-horizon training. To capture long-term causality effec-
+          tively,wepresenttemporalimportancesampling,whichconcentratessupervision
+          on safety-critical chunks identified by ego-motion and behavioral signals.  We
+          furtherdelegatephotorealisticsynthesistoadiffusion-basedmulti-viewrenderer,
+          enriching photorealistic details and improving pixel-level appearance. Compre-
+          hensive experiments demonstrate that X-Foresight significantly outperforms VLA
+          baselines in planning performance while maintaining strong generative fidelity,
+          establishing arobust paradigm for world-knowledge-drivenautonomous systems.
+
+
+1   Introduction
+
+Thepursuitofartificialintelligencein physical worldhasdriven significant interestinworldmodels.
+Withworldmodels,internalrepresentationsoftheenvironmentcanbelearned,whichenforcesagents’
+prediction,planning,andcontrol. Recentworldmodelsemploydiversestrategiestorepresentinternal
+dynamicsoftheworld: video-basedgenerativemodelssuchasSora[2],Genie[3],andX-World[22]
+learn to synthesize photorealistic future frames with large diffusion models; 3D-centric frameworks
+like Marble [12] explicitly model spatial geometry for physically consistent world reconstruction,
+whilelatent-basedmethodssuchasJEPA[1]bypasspixel-spacegenerationentirely,learningsemantic
+state representations through self-supervised predictive frameworks.
+Vision-Language-Action(VLA)modelshaveemergedas powerfulparadigmsforembodieddecision-
+making, unifying perception, reasoning, and control within a single auto-regressive framework.
+Foundationalworks suchas RT-2[23], PaLM-E[6], andOpenVLA [11]have demonstratedremark-
+
+===== PAGE 2 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure1: (A)InferencepipelineofX-Foresight. ThemaincontributionsresidedintheLargeDrive
+Model(LDM)andtheVisionRenderer. (B)Closed-loopinferencevisualizationofpredictedfuture
+framesatt=2s,t=4s,andt=6s;onlythefrontcamerawasshown. (C)X-Foresightoutperformedthe
+baselines across multiple benchmarks.
+
+
+able generalization by transferring web-scale vision-language knowledge to robotic manipulation.
+In the autonomous driving domain, industry systems such as XPeng’s VLA 2.0 [19] exemplify the
+adoption of VLA architectures for end-to-end perception-to-control pipelines. However, prevailing
+VLAarchitecturesremainfundamentallyreactive,lackingdeepworldunderstandingandproactive
+danger-avoidance mechanisms. This limitation stems from their inability to simulate future states
+before acting, forcing policies to rely solely on historical observations. Without forward-looking
+foresight, models struggle to anticipate collisions, navigate through complex scenarios, or exploit
+long-horizon environmental causality to improve agent control.
+Among the representations commonly used in robotics and autonomous driving, video provides one
+of themost holisticdescriptions of thesurrounding environment. Itcaptures both low-levelvisual
+details, such as color, texture, and object shape, and high-level semantic information, such as the
+motion patterns of vehicles and vulnerable road users. Moreover, the ego vehicle’s trajectory can
+often be inferred directly from dash-camera observations. Therefore, we argue that video serves as a
+primary carrier of physical-world knowledge, encoding rich spatial, temporal, and semantic cues that
+are essential for future prediction and decision-making. We thus introduce X-Foresight, a predictive
+worldmodelbuiltatoptheVLAarchitecturethatseamlesslyintegratesmulti-viewfutureprediction
+withclosed-loopactioncontrol. Byactivelyforecastingfuturecameraimages,themodeldevelopsan
+internalizedunderstandingoflong-horizonenvironmentalcausality,enablingproactive,safety-critical
+decision-making while preserving the real-time responsiveness required for autonomous systems.
+Inspired by the success of large language models, future-token prediction has become a central
+paradigmforgenerativesequencemodeling. However,directlytransferringthis paradigmtovideo-
+based world modeling introduces an important modality gap. Language tokens are semantically
+discrete, relatively sparse, and high-entropy, whereas video tokens are often redundant, with high
+frame-to-frame similarity. This difference can easily lead to degenerate future rollouts, where the
+model learns only trivial frame-level extrapolation rather than meaningful physical dynamics. A
+further temporal challenge in world modeling arises from the mismatch between instantaneous
+dynamics and world transitions: effective world representation learning must capture short-term
+dynamicsandlong-termcausalitysimultaneously. Instantaneousdynamicsrelyprimarilyonshort-
+termdensevisualevidence,whereasworldtransitionsdemandlong-horizoncausalreasoningover
+extendedtemporal contexts. Toreconcilethis discrepancy,X-Foresight employsachunk-wise auto-
+regressiverolloutthatjointlyforecastsfuturevisionandactiontokens. Theproposedlong-horizon
+chunk-wiseauto-regressivestrategynotonlyavoidstrivialextrapolationbypreservingdenseintra-
+chunk frames that capture instantaneous dynamics, but also enables efficient training and low-latency
+inference.
+Wefurtherimproveworld-knowledgelearningthroughtargetedtraininginnovations. Sincepredictive
+capability develops progressively, we adopt a curriculum learning schedule in which the model first
+learnstoforecastshorthorizonswithineachchunkandisthengraduallyexposedtolongerprediction
+horizons. Thisprogressivetraining strategyimproves thestabilityoflong-horizonforecastingand
+
+
+                                                          2
+
+===== PAGE 3 =====
+
+      PWM TEAM                                        X-Foresight                                 TECHNICALREPORT
+
+
+enhances the robustness of the learned policy.  Additionally, because temporal segments do not
+contributeequallytoworldmodeling,weintroduceahybridsamplingstrategythatcombinesrandom
+frame selection with importance-weighted sampling.  This approach encourages broad temporal
+coveragewhileemphasizingsafety-criticaltransitions,therebyimprovingthemodel’sabilitytolearn
+informative world knowledge relevant to long-term causality and decision-making. We argue that
+world representations should remain highly abstract; excessive visual detail at the latent level dilutes
+the model’s capacity for structural world understanding. To reconcile abstraction with perceptual
+fidelity, we delegate photorealistic synthesis to a dedicated diffusion module. This enables high-
+fidelity multi-view rendering, wherea diffusion-basedrenderer reconstructsdetailed surround-view
+cameras within the auto-regressive loop, providing dense latent-space supervision.
+In summary, the key contributions of this work are:
+
+        • We introduce along-horizon chunk-wise auto-regressivestrategythat leveragesextended
+          future horizons for world modeling.  This design both mitigates the collapse of world-
+          knowledgelearningundernaivenext-framepredictionandresolvesthetemporaldilemma:
+          denseintra-chunkframesallowthemodeltocaptureinstantaneousdynamics,whilelong-
+          horizon chunk-level prediction promotes the learning of broader world causality.
+        • Toimprovelong-horizon forecastingstabilityandenhance policyrobustness,we exploita
+          curriculum-basedlearningstrategy,startingwithshort-horizonpredictionacrosschunksand
+          gradually extending to longer strides.
+        • Weadopttemporalimportancesampling,ahybridsamplingmechanismthataccountsfor
+          uneven contributions of future frames to world knowledge learning, combining random
+          selection with importance-weighted focus on critical temporal transitions.
+        • The proposed method can acquire high-fidelity multi-view future images. Integration of
+          a diffusion-based renderer into the auto-regressive pipeline is developed to reconstruct
+          photorealistic surround-view details.
+
+Comprehensive experiments demonstrate that X-Foresight significantly outperforms the reactive
+VLAbaselineinplanningsafety,generativefidelityasshowninFig1,establishingarobustparadigm
+for world-knowledge-driven autonomous systems.
+
+2   Data
+
+2.1   Datascale/resolution
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 2: Overview of thelarge-scale multi-camera driving dataset. Thedataset contained approxi-
+mately280,000hoursof driving data, segmented into34Mclips. Multi-view images fromseven
+cameras(front fisheye, front narrow, left/right front, left/right rear, and rear) were processed and
+tokenized into13.8Ttokens, which were used for training the world model.
+
+Webuiltanindustry-leveldatasetwithapproximately280,000hoursofin-housedrivingdata,spanning
+varioustrafficconditionsandenvironmentalscenarios,asillustratedinFig2. Intotal,thedatawas
+
+
+                                                          3
+

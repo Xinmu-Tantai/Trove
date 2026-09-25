@@ -1,0 +1,160 @@
+===== PAGE 1 =====
+
+   VLA-RL: Towards Masterful and General Robotic
+ Manipulation with Scalable Reinforcement Learning
+
+
+
+
+         Guanxing Lu1, Wenkai Guo2, Chubin Zhang1, Yuheng Zhou2, Haonan Jiang1
+                             Zifeng Gao1, Yansong Tang1:, Ziwei Wang2
+              1 Tsinghua Shenzhen International Graduate School, Tsinghua University
+       2 School of Electrical and Electronic Engineering, Nanyang Technological University
+                                github.com/GuanxingLu/vlarl
+
+
+                                                 Abstract
+
+          Recent high-capacity vision-language-action (VLA) models have demonstrated
+          impressive performance on a range of robotic manipulation tasks by imitating
+          human demonstrations.  However, exploiting offline data with limited visited
+          states will cause execution failure in out-of-distribution scenarios.  Intuitively,
+          an exploration-based method that improves on online collected data at test time
+          couldaddressthis limitation. WepresentVLA-RL,an algorithmic andsystematic
+          frameworkthatleveragesonlinereinforcementlearning(RL)toimprovepretrained
+          auto-regressive VLAs in downstream tasks.  Within a unified perspective, we
+          first introduce atrajectory-level RL formulation for auto-regressive VLA training,
+          whichmodelsgeneralroboticmanipulationtrajectoryasmulti-modalmulti-turn
+          conversation. To address thechallenge ofsparse rewards, we fine-tunea pretrained
+          vision-language model as a robotic process reward model, which is trained on
+          pseudo reward labels annotated on automatically extracted task segments.  To
+          scale up, we identify several implementation findings that improve the stability
+          andefficiencyincludingcurriculumselectionstrategy,GPU-balancedvectorized
+          environments,batchdecoding,andcriticwarmup. VLA-RLenablesOpenVLA-7B
+          to surpass the strongest finetuned baseline by 4.5% on 40 challenging robotic
+          manipulation tasks in LIBERO, and even matches the performance of advanced
+          commercialmodels suchasπ0-FAST. Notably,we observethatVLA-RLbenefits
+          fromincreasedtest-timeoptimization,indicatinganearlysparkofinferencescaling
+          laws in robotics.
+              “We want AI agents that can discover like we can, not which contain what we have discovered.”
+                                                                                         — The Bitter Lesson
+1   Introduction
+
+Largefoundationmodelspretrainedoninternet-scaledatasetshavedemonstratedeffectivenessacross
+avarietyofdomains, suchastext[56,13,17],image [79,74,81,80],video [87,73],and audio[14].
+Recently,largevision-language-action(VLA)models[9,8,68,39,44,35,36,19,6,7,57,32]have
+beenproposedbyimitatinglarge-scalehumandemonstrations[15,20,58,52,35,23,16,10,33,18,
+72, 6, 37], which indicates a possible pathway towards generalist robots that can perform diverse
+manipulationtasks. However, exploiting offlinedatawithlimitedvisitedstateswillcauseexecution
+failure in Out-of-Domain (OOD) scenarios at test time.
+Webelievethekeytoovercomingsuchchallengesliesintransformingexploitation-based approaches
+into exploration-based methods, as exemplified by Reinforcement Learning (RL) [63].  Recent
+breakthroughswitnessedinapplyingRLtolargelanguagemodels(LLMs)haveshownremarkable
+
+   :Corresponding author.
+
+
+Preprint. Under review.
+
+===== PAGE 2 =====
+
+Figure 1: Previous VLAsfocus on imitationlearning thatexploits theoffline demonstrations,whileVLA-RL ex-
+ploresimprovinghigh-capacityVLAswithscalablereinforcementlearning. Forevaluation,wetrainOpenVLA-
+7B to master40 challenging robotic manipulation tasks in LIBERO, and show a notable consistentimprovement
+over the imitation learning baseline.
+
+
+progress[17,82,47,31],wherethescalingbenefitsfromimitationpretrainingonofflinewebdataare
+approachingtheirlimits. Consequently,reinforcementlearninghasemergedasapromisingparadigm
+forachievingtest-timescalingimprovementsbytrainingononlinecollecteddatawithunlimitedstate
+coverage. It is natural to ask: can we achieve similar RL-based test-time scaling benefits in the field
+of robotic manipulation?
+On the other hand, many efforts have been proposed to apply RL to robotics [66].  However,
+traditional RL from scratch often suffers from data inefficiency and requires extensive reward
+engineering [2, 29, 85, 91]. Thus, previous works focus on simple domains, with low-dimensional
+state spaces [60, 24, 54] and small-scale network architecture (e.g. MLP)[60, 70, 1, 50, 51], single-
+task learning [92, 40].  In contrast, fine-tuning from large robotics foundation models with rich
+representational knowledge may significantly reduce the search space and enable the model to learn
+complex motion patterns, making training on general tasks and environments possible.
+Weexplorethisquestionthroughasystematicstudy. ToefficientlyimplementscalableRLtraining,we
+presentVLA-RL,aunifiedframeworkthatleveragesonlineRLtoimprovepretrainedauto-regressive
+VLAs. Specifically, within a unified perspective, we first introduce a general RL formulation for
+auto-regressive VLA training, which models general robotic manipulation trajectory as multi-modal
+multi-turnconversation. Toaddresschallengesassociatedwithsparserewardsintheexpansiverobot
+actionspace,weinstantiatea robotic process reward modelasvision-languagemodelfinetunedon
+automaticallyextractedpseudorewardlabels. BasedonVLA-RL,weidentifysystematicimplemen-
+tation improvements, including task selection, GPU-balanced environments, batch decoding, and
+criticwarmup—to enhancestabilityandefficiency. Empirically, weadoptOpenVLA-7B [39]as the
+baseVLAandapply ourmethodto40challengingrobotictasksin LIBERO[45]. Theresultsshow
+thatVLA-RLimproves thebase modelby alargemarginof4.5%and even matchestheperformance
+ofadvancedcommercialmodelssuchasπ0-FAST[57]. Furthermore,VLA-RL’sperformanceconsis-
+tentlyimproveswithincreasedtest-timecomputation,suggestingpreliminaryevidenceofinference
+scaling laws [64] in robotics.
+
+2   Related Work
+
+Robotic Foundation Models. Robotic foundation models demonstrating remarkable potential in
+developinggeneralizablerobotbehaviorsthroughmulti-tasktraining[9,8,68,39,44,35,36,19,6,7,
+57,32,48,46]onextensivemulti-taskandmulti-embodimentrobotdatasets[15,20,16,18,72,37].
+Notably,OpenVLA-7B[39]finetuneshigh-capacityvision-languagemodelstogeneraterobotactions
+aslanguagetokensinthemodelvocabulary,depictingimpressivegeneralizabilityacrossvarioustasks.
+However,theseVLAstrainedthroughimitationlearningfacesignificantdeploymentchallengeswhen
+dealing with OOD scenarios that are not covered in the offline expert demonstrations.
+ReinforcementLearningforRoboticsModels. Althoughreinforcementlearninghasdemonstrated
+numerous achievements in robotics [66], implementing RL methods from the ground up typically
+demandssophisticatedrewardandtrainingparadigmdesigns[2,29,85,91,28,89,22]. Consequently,
+researchershavethoroughly investigated theutilization ofpretrained modelsto enhanceRL perfor-
+mance [65,38,67,54,25,24,34,49,4,93,76,70,27,77]. However, priorstudies necessitate com-
+pleteofflinedatasetavailabilitythroughoutthefine-tuningprocess[54,1,25,24,34,71,40,49,60,5].
+
+
+                                                        2
+
+===== PAGE 3 =====
+
+Figure2: TheoverallpipelineofVLA-RL,whichiscomposedofatransformer-basedpolicy,ahomogeneous
+value model, a frozen robotic process reward model, and the vectorized environments.
+
+
+Furthermore, other proposed methodologies are exclusively tested in environments with simplified
+state representations [60, 24, 54], naive neural network structures [60, 70, 1, 50, 51], and narrow
+single-tasktrainingparadigms[92,40]. Incontrast,VLA-RLexploresfine-tuningfromlargerobotics
+foundationmodelswithtrajectory-levelRL,wheretherichrepresentationalknowledgesignificantly
+reducesthesearchspaceandenablesthemodeltolearncomplexmotionpatterns,makingtrainingon
+general tasks and environments possible.
+Reinforcement Learning for Large Models. Reinforcement learning has significantly enhanced
+LLMs’ reasoning capabilities through approaches that inspire our work [62, 17, 88, 43, 56, 11,
+75, 82, 47, 31, 3].  This family of methods begins with STaR [84] and includes reinforced self-
+training[21]andrejectionfine-tuning[83],relyingonsolutionsgeneratedbyLLMsforinteractive
+self-updating.  To facilitate more autonomous exploration and exploitation, policy optimization
+methodslikePPO[62]arewidelyusedincurrentpractice. Forexample,GRPO[17]strengthenssys-
+tematic problem-solving capabilities particularly relevant to sequential decision-making. Approaches
+enabling reasoning include Process Reward Models [88, 43] that evaluate intermediate reasoning,
+and conversation-based training methods [56, 11, 75] that optimize multi-turn interactions. Recent
+proposedRL techniques [82,47,31]demonstrate thatdifferentimplementation detailssignificantly
+improvethescalingofreasoninginlanguagemodels. Ourworkbridgestheseadvancestoroboticsby
+formulatingtrajectory-leveloptimizationasamulti-modal,multi-turnconversation,enablingrobots
+to benefit from similar RL frameworks that have proven effective for large language models.
+
+3   VLA-RL
+
+Inthis section,westart withbriefpreliminaries ontheproblem descriptionsandopen-sourced VLA
+models(Sec. 3.1). Wepresent anoverview ofour pipeline(Sec.3.2). Subsequently,we introducethe
+mathematicalformulationofgeneralroboticmanipulationasmulti-modalmulti-turnconversation
+(Sec. 3.3). Then we present       robotic process reward model for reward densification (Sec. 3.4). To
+implementinpractice, webuildandpresenttheVLA-RL system(Sec. 3.5)withseveralkey findings
+that facilitate scalable VLA training with RL.
+
+3.1   Preliminaries
+
+General robotic manipulation has been a core pursuit of the robotic community for a long time.
+The agent is required to interactively determine the next robot action (the end-effector’s pose) to
+performdiversetasks,basedonthevisualobservationandthehumaninstructionthatspecifiesthe
+current task. Recently, high-capacity, pretrained vision-and-language models have demonstrated
+generalizability across a wide range of language-conditioned manipulation tasks.  Among these,
+OpenVLA-7B[39]isaleadingopen-sourceVLA,whichhenceactsasthebasemodelofourmethod.
+At its core lies an auto-regressive LLM Llama-2-7B [69] with a two-stream visual encoder that
+
+
+                                                         3
+
